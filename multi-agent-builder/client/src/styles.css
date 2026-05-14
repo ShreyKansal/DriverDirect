@@ -1,0 +1,213 @@
+@import "@fontsource/cascadia-code/400.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  color-scheme: light;
+  --color-canvas: 247 247 244;
+  --color-canvas-soft: 250 250 247;
+  --color-panel: 255 255 255;
+  --color-surface-strong: 230 229 224;
+  --color-hairline: 230 229 224;
+  --color-hairline-soft: 239 238 232;
+  --color-hairline-strong: 207 205 196;
+  --color-ink: 38 37 30;
+  --color-body: 90 88 82;
+  --color-muted: 128 125 114;
+  --color-muted-soft: 160 156 146;
+  --color-primary: 230 0 0;
+  --color-primary-active: 190 0 0;
+  --color-timeline-thinking: 223 168 143;
+  --color-timeline-grep: 159 201 162;
+  --color-timeline-read: 159 187 224;
+  --color-timeline-edit: 192 168 221;
+  --color-timeline-done: 192 133 50;
+  --color-success: 31 138 101;
+  --color-error: 207 45 86;
+  /* Terminal */
+  --term-bg: #282828;
+  --term-bar: #303030;
+  --term-sidebar: #2a2a2a;
+  --term-hover: #2f2f2f;
+  --term-active: #303030;
+  --term-border: #3a3a3a;
+  --term-border-sub: #30363d;
+  --term-active-text: #f0f6fc;
+  --term-text: #d4d4d4;
+  --term-muted: #9aa4ad;
+  --term-dim: #6e7681;
+  --term-green: #89d185;
+  --term-yellow: #dcdcaa;
+  --term-red: #f48771;
+  --term-btn-hover: #31363b;
+}
+
+[data-theme="github-dark"] {
+  color-scheme: dark;
+  --color-canvas: 31 36 40;
+  --color-canvas-soft: 40 46 52;
+  --color-panel: 36 41 46;
+  --color-surface-strong: 43 48 54;
+  --color-hairline: 27 31 35;
+  --color-hairline-soft: 47 54 61;
+  --color-hairline-strong: 68 77 86;
+  --color-ink: 225 228 232;
+  --color-body: 209 213 218;
+  --color-muted: 149 157 165;
+  --color-muted-soft: 106 115 125;
+  --color-primary: 249 130 108;
+  --color-primary-active: 234 106 82;
+  --color-timeline-thinking: 255 171 112;
+  --color-timeline-grep: 133 232 157;
+  --color-timeline-read: 121 184 255;
+  --color-timeline-edit: 179 146 240;
+  --color-timeline-done: 249 130 108;
+  --color-success: 52 208 88;
+  --color-error: 234 74 90;
+  /* Terminal — GitHub Dark exact values from dark.json */
+  --term-bg: #24292e;
+  --term-bar: #1f2428;
+  --term-sidebar: #1f2428;
+  --term-hover: #282e34;
+  --term-active: #2f363d;
+  --term-border: #1b1f23;
+  --term-border-sub: #2f363d;
+  --term-active-text: #e1e4e8;
+  --term-text: #d1d5da;
+  --term-muted: #959da5;
+  --term-dim: #6a737d;
+  --term-green: #85e89d;
+  --term-yellow: #ffea7f;
+  --term-red: #f97583;
+  --term-btn-hover: #282e34;
+}
+
+@keyframes flow-dash {
+  to { stroke-dashoffset: -24; }
+}
+
+.edge-flow {
+  animation: flow-dash 0.5s linear infinite;
+}
+
+body {
+  margin: 0;
+  background: rgb(var(--color-canvas));
+  color: rgb(var(--color-ink));
+  font-family: Inter, system-ui, "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+html,
+body,
+#root,
+#__next,
+body > div {
+  height: 100%;
+}
+
+body {
+  overflow: hidden;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.react-flow__node {
+  border-radius: 6px;
+}
+
+.react-flow,
+.react-flow__renderer {
+  width: 100%;
+  height: 100%;
+}
+
+.react-flow__controls,
+.react-flow__minimap {
+  background: rgb(var(--color-panel));
+  border: 1px solid rgb(var(--color-hairline));
+  box-shadow: none;
+}
+
+.mermaid-preview svg {
+  max-width: 100%;
+}
+
+/* ── Global thin scrollbars ─────────────────────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(128, 125, 114, 0.25) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 3px;
+  height: 3px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(128, 125, 114, 0.25);
+  border-radius: 9999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 125, 114, 0.55);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.panel-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-hairlineStrong bg-panel px-4 text-[13px] font-medium leading-none text-ink transition disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-primary bg-primary px-4 text-[13px] font-medium leading-none text-white transition disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .btn-danger {
+    @apply inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-error bg-panel px-3 text-[13px] font-medium leading-none text-error transition;
+  }
+
+  .icon-btn {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-lg border border-hairlineStrong bg-panel text-body transition disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .field {
+    @apply block space-y-1;
+  }
+
+  .field span {
+    @apply text-[10px] font-semibold uppercase tracking-wider text-muted;
+  }
+
+  .input {
+    @apply w-full rounded-md border border-hairlineStrong bg-panel px-3 py-2 text-[13px] text-ink outline-none transition placeholder:text-mutedSoft focus:border-ink;
+  }
+
+
+  .code-surface {
+    @apply font-mono text-[12px] leading-[1.5];
+  }
+}

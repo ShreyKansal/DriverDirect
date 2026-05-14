@@ -1,0 +1,16 @@
+[
+  "fastapi",
+  "uvicorn",
+  "langchain",
+  "langchain-community",
+  "langchain-experimental",
+  "langchain-groq",
+  "requests",
+  "httpx",
+  "numpy",
+  "pandas",
+  "pydantic",
+  "ddgs",
+  "wikipedia",
+  "arxiv"
+]
