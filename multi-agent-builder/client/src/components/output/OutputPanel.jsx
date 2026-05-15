@@ -37,7 +37,7 @@ function TerminalView({ trace, execError, running, copied, copyOutput, hasRuns }
     <div className="space-y-0.5">
       {running && (
         <p className="font-mono text-[13px] text-[var(--term-yellow)]">
-          <span className="animate-pulse">...</span> Workflow running. Open OUTPUT for step-by-step execution.
+          <span className="animate-pulse">...</span> Workflow running. Open TERMINAL for step-by-step execution.
         </p>
       )}
 
@@ -76,7 +76,7 @@ function TerminalView({ trace, execError, running, copied, copyOutput, hasRuns }
       ) : (
         trace && (
           <p className="font-mono text-[13px] text-[var(--term-muted)]">
-            No final output yet. Open OUTPUT to inspect the current run.
+            No final output yet. Open TERMINAL to inspect the current run.
           </p>
         )
       )}
@@ -306,7 +306,7 @@ export default function OutputPanel({ onClose }) {
 
       <div className="flex min-h-0 flex-1">
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          {activeTab === "logs" && agentList.length > 1 && (
+          {activeTab === "terminal" && agentList.length > 1 && (
             <div className="flex shrink-0 items-center gap-2 border-b border-[var(--term-border)] bg-[var(--term-sidebar)] px-3 py-1.5">
               <span className="font-mono text-[12px] text-[var(--term-muted)]">filter</span>
               <select
@@ -324,6 +324,13 @@ export default function OutputPanel({ onClose }) {
 
           <div className="min-h-0 flex-1 overflow-auto bg-[var(--term-bg)] px-4 py-2">
             {activeTab === "terminal" ? (
+              <LogsView
+                trace={trace}
+                execError={execError}
+                bootstrapPhase={bootstrapPhase}
+                filteredSteps={filteredSteps}
+              />
+            ) : (
               <TerminalView
                 trace={trace}
                 execError={execError}
@@ -331,13 +338,6 @@ export default function OutputPanel({ onClose }) {
                 copied={copied}
                 copyOutput={copyOutput}
                 hasRuns={runProjectIds.length > 0}
-              />
-            ) : (
-              <LogsView
-                trace={trace}
-                execError={execError}
-                bootstrapPhase={bootstrapPhase}
-                filteredSteps={filteredSteps}
               />
             )}
           </div>

@@ -5,7 +5,8 @@ import { validateWorkflow } from "./graphValidator.js";
 import { createStep, completeStep, failStep } from "../services/executionLogger.js";
 import { collectDependencies } from "../services/dependencyCollector.js";
 import { startSandbox, bootstrap, stopSandbox } from "../services/sandboxManager.js";
-import { getProjectKeys } from "../services/keyStore.js";
+import { getProjectKeys }     from "../services/keyStore.js";
+import { getCustomProviders } from "../services/customProviderStore.js";
 
 function workflowNeedsDocker(workflow) {
   return workflow.nodes.some((n) =>
@@ -78,8 +79,10 @@ export async function executeWorkflow({ workflow, userTask, onEvent = () => {} }
     throw error;
   }
 
-  // Load project-level API keys (falls back to env vars inside createChatModel)
+  // Load project-level API keys + custom providers
   const projectKeys = workflow.id ? await getProjectKeys(workflow.id).catch(() => ({})) : {};
+  const customProvidersArr = workflow.id ? await getCustomProviders(workflow.id).catch(() => []) : [];
+  const customProviders = Object.fromEntries(customProvidersArr.map((p) => [p.id, p]));
 
   const runId = `run_${nanoid(8)}`;
   const needsDocker = workflowNeedsDocker(workflow);
@@ -149,7 +152,7 @@ export async function executeWorkflow({ workflow, userTask, onEvent = () => {} }
         const output = await agent.run({
           userTask,
           previousOutputs,
-          workflowContext: { ...workflow, incomingOutputs, projectKeys },
+          workflowContext: { ...workflow, incomingOutputs, projectKeys, customProviders },
           runId,
           onEvent
         });
@@ -178,7 +181,7 @@ export async function executeWorkflow({ workflow, userTask, onEvent = () => {} }
       finalOutput = await new OrchestratorAgent(orchestrator).run({
         userTask,
         previousOutputs,
-        workflowContext: { ...workflow, incomingOutputs: orchInputs, projectKeys },
+        workflowContext: { ...workflow, incomingOutputs: orchInputs, projectKeys, customProviders },
         runId,
         onEvent
       });

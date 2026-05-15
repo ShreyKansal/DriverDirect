@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   ArrowRight, Bot, Check, ChevronDown, ChevronRight, Copy,
-  Crown, FileInput, FileOutput, MousePointerClick, Plus, Trash2, Unlink, Wrench
+  Crown, FileInput, FileOutput, MousePointerClick, Plus, Settings2,
+  Trash2, Unlink, Wrench
 } from "lucide-react";
 import { useWorkflowStore } from "../../store/workflowStore.js";
 import { BUILDER_TARGETS, DEFAULT_PLAN_CONSTRAINTS, NODE_TYPE_LABELS, NODE_TYPES } from "../../utils/graphUtils.js";
@@ -27,7 +28,7 @@ function Section({ label, children, defaultOpen = true, badge }) {
   return (
     <div className="border-t border-hairline">
       <button
-        className="flex w-full items-center justify-between px-4 py-2.5 text-left transition-colors hover:bg-canvasSoft/60"
+        className="flex w-full items-center justify-between px-4 py-2 text-left transition-colors hover:bg-canvasSoft/60"
         onClick={() => setOpen((o) => !o)}
       >
         <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">{label}</span>
@@ -43,7 +44,7 @@ function Section({ label, children, defaultOpen = true, badge }) {
           />
         </div>
       </button>
-      {open && <div className="space-y-3 px-4 pb-4">{children}</div>}
+      {open && <div className="space-y-2 px-4 pb-3">{children}</div>}
     </div>
   );
 }
@@ -199,6 +200,10 @@ export default function AgentConfigPanel({ showProject, onProjectSettings }) {
 
   const [showOutputModal, setShowOutputModal] = useState(false);
   const [linkTargetId, setLinkTargetId]       = useState("");
+  const [activeTab, setActiveTab]             = useState("main");
+
+  // Reset to main tab whenever the selected node changes
+  useEffect(() => { setActiveTab("main"); }, [selectedNodeId]);
 
   const agent = workflow.nodes.find((n) => n.id === selectedNodeId);
 
@@ -240,254 +245,256 @@ export default function AgentConfigPanel({ showProject, onProjectSettings }) {
     <>
       <div className="flex h-full flex-col bg-panel">
 
-        {/* ── Compact header ─────────────────────────────────────────────── */}
-        <div className="flex items-center gap-2.5 border-b border-hairline px-4 py-3">
+        {/* ── Header: editable name + type badge + settings toggle ── */}
+        <div className="flex items-center gap-2 border-b border-hairline px-4 py-3">
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-surfaceStrong text-muted">
             {nodeIcon(agent.type, 13)}
           </span>
-          <p className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{agent.name}</p>
+          <input
+            className="min-w-0 flex-1 bg-transparent text-[13px] font-semibold text-ink outline-none placeholder:text-muted"
+            value={agent.name}
+            onChange={(e) => update({ name: e.target.value })}
+          />
           <span className="shrink-0 rounded bg-canvasSoft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
             {NODE_TYPE_LABELS[agent.type] || agent.type}
           </span>
+          <button
+            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition ${
+              activeTab === "settings" ? "bg-primary/10 text-primary" : "text-muted hover:bg-canvasSoft"
+            }`}
+            onClick={() => setActiveTab((t) => (t === "settings" ? "main" : "settings"))}
+            title="Settings"
+          >
+            <Settings2 size={13} />
+          </button>
         </div>
 
         {/* ── Scrollable body ─────────────────────────────────────────────── */}
         <div className="panel-scroll flex-1 overflow-auto">
 
-          {/* Identity fields — always visible, no section wrapper */}
-          <div className="space-y-3 px-4 py-3">
-            <label className="field">
-              <span>Name</span>
-              <input className="input" value={agent.name} onChange={(e) => update({ name: e.target.value })} />
-            </label>
-            <label className="field">
-              <span>Type</span>
-              <Select
-                value={agent.type}
-                onChange={(v) => updateType(v)}
-                options={NODE_TYPES.map((t) => ({ value: t, label: NODE_TYPE_LABELS[t] || t }))}
-              />
-            </label>
-            <label className="field">
-              <span>{isInput ? "Description" : "Role"}</span>
-              <textarea
-                className="input min-h-[48px] resize-y"
-                value={agent.role}
-                onChange={(e) => update({ role: e.target.value })}
-              />
-            </label>
-          </div>
-
-          {/* Model */}
-          {isExecutable && (
-            <Section label="Model" defaultOpen={true}>
-              <ModelSettings agent={agent} update={update} />
-            </Section>
-          )}
-
-          {/* Prompt */}
-          {!isOutput && (
-            <Section label="Prompt" defaultOpen={true}>
-              <label className="field">
-                <span>{isInput ? "Prompt to Orchestrator" : "System Prompt"}</span>
-                <textarea
-                  className="input min-h-[88px] resize-y"
-                  value={agent.prompt}
-                  onChange={(e) => update({ prompt: e.target.value })}
-                  placeholder={isInput
-                    ? "Write the runtime prompt the orchestrator receives."
-                    : "Describe exactly how this agent should behave."}
-                />
-              </label>
-              {!isInput && (
-                <label className="field">
-                  <span>Input Mode</span>
-                  <Select
-                    value={agent.inputMode}
-                    onChange={(v) => update({ inputMode: v })}
-                    options={[
-                      { value: "user_input",            label: "User Input" },
-                      { value: "previous_agent_output", label: "Previous Agent Output" },
-                      { value: "combined_context",      label: "Combined Context" }
-                    ]}
-                  />
-                </label>
-              )}
-            </Section>
-          )}
-
-          {/* Output node info */}
-          {isOutput && (
-            <Section label="Output Node" defaultOpen={true}>
-              <p className="rounded-md border border-hairline bg-canvasSoft p-3 text-[12px] leading-relaxed text-body">
-                Output nodes render whatever the orchestrator returns — no model call, no tools.
-              </p>
-            </Section>
-          )}
-
-          {/* Tools — collapsed by default, badge shows count */}
-          {isExecutable && (() => {
-            const attachedTools = workflow.nodes.filter((n) =>
-              n.type === "tool" && workflow.edges.some((e) => e.source === agent.id && e.target === n.id && e.type === "tool")
-            );
-            return (
-              <Section label="Tools" defaultOpen={attachedTools.length > 0 || toolCount > 0} badge={(attachedTools.length + toolCount) || null}>
-
-                {/* ── Canvas tool nodes ─────────────────────────────── */}
-                {attachedTools.length > 0 && (
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted">Tool Nodes</p>
-                    {attachedTools.map((t) => (
-                      <button
-                        key={t.id}
-                        className="flex w-full items-center gap-2 rounded-md border border-hairline bg-canvasSoft px-3 py-2 text-left transition hover:border-hairlineStrong hover:bg-surfaceStrong"
-                        onClick={() => { useWorkflowStore.getState().selectNode(t.id); useWorkflowStore.getState().focusNode(t.id); }}
-                      >
-                        <Wrench size={12} className="shrink-0 text-body" />
-                        <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-ink">{t.name}</span>
-                        <span className="rounded border border-hairline bg-panel px-1.5 py-0.5 text-[10px] text-muted">
-                          {t.toolType === "builtin" ? "Builtin" : t.toolType === "mcp" ? "MCP" : t.toolType === "custom" ? "Custom" : "HTTP"}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {/* ── Add Tool Node CTA ─────────────────────────────── */}
-                <button
-                  className="flex w-full items-center justify-center gap-1.5 rounded-md border border-ink bg-ink py-2 text-[12px] font-medium text-white transition hover:bg-ink/85"
-                  onClick={() => addTool(agent.id)}
-                >
-                  <Plus size={13} /> Add Tool Node
-                </button>
-
-                {/* ── Built-in tools (LangGraph/LangChain only) ─────── */}
-                {(workflow.builderTarget === "langgraph" || workflow.builderTarget === "langchain") && (
-                  <div className="space-y-1.5">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted">
-                      Built-in tools
-                      <span className="ml-1.5 font-mono normal-case text-muted/70">
-                        ({workflow.builderTarget === "langchain" ? "LangChain" : "LangGraph"})
-                      </span>
-                    </p>
-                    <ToolPicker
-                      selectedTools={agent.builtinTools || []}
-                      onChange={(tools) => update({ builtinTools: tools })}
+          {/* ── MAIN TAB: Prompt → Model → Tools ── */}
+          {activeTab === "main" && (
+            <>
+              {/* Prompt */}
+              {!isOutput && (
+                <Section label="Prompt" defaultOpen={true}>
+                  <label className="field">
+                    <span>{isInput ? "Prompt to Orchestrator" : "System Prompt"}</span>
+                    <textarea
+                      className="input min-h-[140px] resize-y"
+                      value={agent.prompt}
+                      onChange={(e) => update({ prompt: e.target.value })}
+                      placeholder={isInput
+                        ? "Write the runtime prompt the orchestrator receives."
+                        : "Describe exactly how this agent should behave."}
                     />
-                  </div>
-                )}
+                  </label>
+                  {!isInput && (
+                    <label className="field">
+                      <span>Input Mode</span>
+                      <Select
+                        value={agent.inputMode}
+                        onChange={(v) => update({ inputMode: v })}
+                        options={[
+                          { value: "user_input",            label: "User Input" },
+                          { value: "previous_agent_output", label: "Previous Agent Output" },
+                          { value: "combined_context",      label: "Combined Context" }
+                        ]}
+                      />
+                    </label>
+                  )}
+                </Section>
+              )}
 
-                {/* ── Custom inline tools ───────────────────────────── */}
-                <div className="space-y-1.5">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted">Custom inline tools</p>
-                  <CustomToolEditor
-                    customTools={agent.customTools || []}
-                    architecture={workflow.builderTarget || "python"}
-                    onChange={(tools) => update({ customTools: tools })}
+              {/* Output node info */}
+              {isOutput && (
+                <Section label="Output Node" defaultOpen={true}>
+                  <p className="rounded-md border border-hairline bg-canvasSoft p-3 text-[12px] leading-relaxed text-body">
+                    Output nodes render whatever the orchestrator returns — no model call, no tools.
+                  </p>
+                </Section>
+              )}
+
+              {/* Model */}
+              {isExecutable && (
+                <Section label="Model" defaultOpen={true}>
+                  <ModelSettings agent={agent} update={update} />
+                </Section>
+              )}
+
+              {/* Tools */}
+              {isExecutable && (() => {
+                const attachedTools = workflow.nodes.filter((n) =>
+                  n.type === "tool" && workflow.edges.some((e) => e.source === agent.id && e.target === n.id && e.type === "tool")
+                );
+                return (
+                  <Section label="Tools" defaultOpen={attachedTools.length > 0 || toolCount > 0} badge={(attachedTools.length + toolCount) || null}>
+
+                    {attachedTools.length > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted">Tool Nodes</p>
+                        {attachedTools.map((t) => (
+                          <button
+                            key={t.id}
+                            className="flex w-full items-center gap-2 rounded-md border border-hairline bg-canvasSoft px-3 py-2 text-left transition hover:border-hairlineStrong hover:bg-surfaceStrong"
+                            onClick={() => { useWorkflowStore.getState().selectNode(t.id); useWorkflowStore.getState().focusNode(t.id); }}
+                          >
+                            <Wrench size={12} className="shrink-0 text-body" />
+                            <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-ink">{t.name}</span>
+                            <span className="rounded border border-hairline bg-panel px-1.5 py-0.5 text-[10px] text-muted">
+                              {t.toolType === "builtin" ? "Builtin" : t.toolType === "mcp" ? "MCP" : t.toolType === "custom" ? "Custom" : "HTTP"}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    <button
+                      className="flex w-full items-center justify-center gap-1.5 rounded-md border border-ink bg-ink py-2 text-[12px] font-medium text-white transition hover:bg-ink/85"
+                      onClick={() => addTool(agent.id)}
+                    >
+                      <Plus size={13} /> Add Tool Node
+                    </button>
+
+                    {(workflow.builderTarget === "langgraph" || workflow.builderTarget === "langchain") && (
+                      <div className="space-y-1.5">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted">
+                          Built-in tools
+                          <span className="ml-1.5 font-mono normal-case text-muted/70">
+                            ({workflow.builderTarget === "langchain" ? "LangChain" : "LangGraph"})
+                          </span>
+                        </p>
+                        <ToolPicker
+                          selectedTools={agent.builtinTools || []}
+                          onChange={(tools) => update({ builtinTools: tools })}
+                        />
+                      </div>
+                    )}
+
+                    <div className="space-y-1.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted">Custom inline tools</p>
+                      <CustomToolEditor
+                        customTools={agent.customTools || []}
+                        architecture={workflow.builderTarget || "python"}
+                        onChange={(tools) => update({ customTools: tools })}
+                      />
+                    </div>
+
+                    {toolCount > 0 && (
+                      <label className="field">
+                        <span>Tool mode</span>
+                        <Select
+                          value={agent.toolMode || "auto"}
+                          onChange={(v) => update({ toolMode: v })}
+                          options={[
+                            { value: "auto",  label: "Auto — agent picks the right tool" },
+                            { value: "force", label: "Force — call all tools every step" }
+                          ]}
+                        />
+                      </label>
+                    )}
+                  </Section>
+                );
+              })()}
+            </>
+          )}
+
+          {/* ── SETTINGS TAB: Role → Connections → Output ── */}
+          {activeTab === "settings" && (
+            <>
+              {/* Role / Description */}
+              <Section label="Role / Description" defaultOpen={true}>
+                <textarea
+                  className="input min-h-[72px] resize-y"
+                  value={agent.role}
+                  onChange={(e) => update({ role: e.target.value })}
+                  placeholder={isInput ? "Describe this input node…" : "Describe this agent's role…"}
+                />
+              </Section>
+
+              {/* Connections */}
+              <Section label="Connections" defaultOpen={true} badge={connCount || null}>
+                <div className="flex gap-2">
+                  <Select
+                    className="flex-1"
+                    value={selectedLinkTarget}
+                    onChange={(v) => setLinkTargetId(v)}
+                    options={availableTargets.map((n) => ({ value: n.id, label: n.name }))}
                   />
+                  <button
+                    className="icon-btn h-9 w-9 shrink-0"
+                    onClick={() => connectNodes(agent.id, selectedLinkTarget)}
+                    disabled={!selectedLinkTarget}
+                    title="Add link"
+                  >
+                    <Plus size={14} />
+                  </button>
                 </div>
 
-                {toolCount > 0 && (
+                {outgoing.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted">Out</p>
+                    {outgoing.map((edge) => {
+                      const target = nodesById.get(edge.target);
+                      return (
+                        <div key={edge.id} className="flex items-center justify-between rounded border border-hairline bg-canvasSoft px-2.5 py-1.5">
+                          <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-ink">
+                            <ArrowRight size={11} className="shrink-0 text-primary" />
+                            <span className="truncate">{target?.name || edge.target}</span>
+                          </span>
+                          <button className="ml-2 shrink-0 text-muted/60 transition hover:text-error" onClick={() => removeEdge(edge.id)} title="Remove">
+                            <Unlink size={11} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {incoming.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted">In</p>
+                    {incoming.map((edge) => {
+                      const source = nodesById.get(edge.source);
+                      return (
+                        <div key={edge.id} className="flex items-center gap-1.5 rounded border border-hairline bg-canvasSoft px-2.5 py-1.5 text-[12px] text-body">
+                          <ArrowRight size={11} className="shrink-0 text-primary" />
+                          <span className="truncate">{source?.name || edge.source}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {connCount === 0 && (
+                  <p className="rounded border border-dashed border-hairlineStrong p-2.5 text-[11px] text-muted">
+                    No connections yet.
+                  </p>
+                )}
+              </Section>
+
+              {/* Output format (agents + orchestrators only) */}
+              {isExecutable && (
+                <Section label="Output" defaultOpen={true}>
                   <label className="field">
-                    <span>Tool mode</span>
+                    <span>Format</span>
                     <Select
-                      value={agent.toolMode || "auto"}
-                      onChange={(v) => update({ toolMode: v })}
+                      value={agent.outputFormat}
+                      onChange={(v) => update({ outputFormat: v })}
                       options={[
-                        { value: "auto",  label: "Auto — agent picks the right tool" },
-                        { value: "force", label: "Force — call all tools every step" }
+                        { value: "plain_text", label: "Plain Text" },
+                        { value: "markdown",   label: "Markdown" },
+                        { value: "json",       label: "JSON" }
                       ]}
                     />
                   </label>
-                )}
-              </Section>
-            );
-          })()}
-
-          {/* Output Format — collapsed by default */}
-          {isExecutable && (
-            <Section label="Output" defaultOpen={false}>
-              <label className="field">
-                <span>Format</span>
-                <Select
-                  value={agent.outputFormat}
-                  onChange={(v) => update({ outputFormat: v })}
-                  options={[
-                    { value: "plain_text", label: "Plain Text" },
-                    { value: "markdown",   label: "Markdown" },
-                    { value: "json",       label: "JSON" }
-                  ]}
-                />
-              </label>
-              <button className="btn h-9 w-full justify-between text-[12px]" onClick={() => setShowOutputModal(true)}>
-                Configure Output Schema <ChevronRight size={13} />
-              </button>
-            </Section>
+                  <button className="btn h-9 w-full justify-between text-[12px]" onClick={() => setShowOutputModal(true)}>
+                    Configure Output Schema <ChevronRight size={13} />
+                  </button>
+                </Section>
+              )}
+            </>
           )}
-
-          {/* Connections — collapsed by default, badge shows count */}
-          <Section label="Connections" defaultOpen={false} badge={connCount || null}>
-            {/* Add link */}
-            <div className="flex gap-2">
-              <Select
-                className="flex-1"
-                value={selectedLinkTarget}
-                onChange={(v) => setLinkTargetId(v)}
-                options={availableTargets.map((n) => ({ value: n.id, label: n.name }))}
-              />
-              <button
-                className="icon-btn h-9 w-9 shrink-0"
-                onClick={() => connectNodes(agent.id, selectedLinkTarget)}
-                disabled={!selectedLinkTarget}
-                title="Add link"
-              >
-                <Plus size={14} />
-              </button>
-            </div>
-
-            {/* Outgoing edges */}
-            {outgoing.length > 0 && (
-              <div className="space-y-1">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted">Out</p>
-                {outgoing.map((edge) => {
-                  const target = nodesById.get(edge.target);
-                  return (
-                    <div key={edge.id} className="flex items-center justify-between rounded border border-hairline bg-canvasSoft px-2.5 py-1.5">
-                      <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-ink">
-                        <ArrowRight size={11} className="shrink-0 text-primary" />
-                        <span className="truncate">{target?.name || edge.target}</span>
-                      </span>
-                      <button className="ml-2 shrink-0 text-muted/60 transition hover:text-error" onClick={() => removeEdge(edge.id)} title="Remove">
-                        <Unlink size={11} />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Incoming edges */}
-            {incoming.length > 0 && (
-              <div className="space-y-1">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted">In</p>
-                {incoming.map((edge) => {
-                  const source = nodesById.get(edge.source);
-                  return (
-                    <div key={edge.id} className="flex items-center gap-1.5 rounded border border-hairline bg-canvasSoft px-2.5 py-1.5 text-[12px] text-body">
-                      <ArrowRight size={11} className="shrink-0 text-primary" />
-                      <span className="truncate">{source?.name || edge.source}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {connCount === 0 && (
-              <p className="rounded border border-dashed border-hairlineStrong p-2.5 text-[11px] text-muted">
-                No connections yet.
-              </p>
-            )}
-          </Section>
 
           <div className="h-3" />
         </div>

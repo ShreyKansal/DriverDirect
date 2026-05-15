@@ -6,7 +6,6 @@ import ThreePanelLayout from "./components/layout/ThreePanelLayout.jsx";
 import ArchitecturePicker from "./components/modals/ArchitecturePicker.jsx";
 import { useWorkflowStore } from "./store/workflowStore.js";
 import { syncUser } from "./api/projectApi.js";
-import { useTheme } from "./hooks/useTheme.js";
 
 export default function App() {
   const needsArchitectureSelection = useWorkflowStore((s) => s.needsArchitectureSelection);
@@ -14,7 +13,6 @@ export default function App() {
   const setCurrentUser             = useWorkflowStore((s) => s.setCurrentUser);
   const { data: session, status }  = useSession();
   const router                     = useRouter();
-  useTheme();
 
   useEffect(() => {
     if (status !== "authenticated" || !session?.user) return;

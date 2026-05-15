@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import {
   Bot, Check, ChevronDown, Code2, Copy, Crown,
   Download, FileInput, FileOutput, FileText, FolderOpen,
-  LayoutDashboard, LogOut, MessageSquare, Moon, MousePointerClick,
+  LayoutDashboard, LogOut, MessageSquare, MousePointerClick,
   Play, Plus, RotateCcw, Search, Server, Settings2,
-  Sidebar, Square, Sun, Trash2, Upload, User, Wrench, X
+  Sidebar, Square, Trash2, Upload, User, Wrench, X
 } from "lucide-react";
-import { useTheme } from "../../hooks/useTheme.js";
 import { signOut, useSession } from "next-auth/react";
 import ProfileModal from "../profile/ProfileModal.jsx";
+import { AnimatedThemeToggler } from "../ui/AnimatedThemeToggler.jsx";
 import { getWorkflows } from "../../api/workflowApi.js";
 import { useWorkflowStore } from "../../store/workflowStore.js";
 import { BUILDER_TARGETS, NODE_TYPE_LABELS } from "../../utils/graphUtils.js";
@@ -204,15 +204,14 @@ export default function Header() {
   const activeWorkspaceTab = useWorkflowStore((state) => state.activeWorkspaceTab);
   const openProjectSettings = useWorkflowStore((state) => state.openProjectSettings);
   const openWorkflowTab = useWorkflowStore((state) => state.openWorkflowTab);
-  const settingsModalOpen = useWorkflowStore((state) => state.settingsModalOpen);
   const createProjectFromWorkflow = useWorkflowStore((state) => state.createProjectFromWorkflow);
 
   const { data: session } = useSession();
-  const { theme, toggleTheme } = useTheme();
 
   const [projectOpen, setProjectOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const openDocsTab = useWorkflowStore((s) => s.openDocsTab);
   const [openMenu, setOpenMenu] = useState(null);
   const [serverTemplates, setServerTemplates] = useState([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
@@ -243,6 +242,9 @@ export default function Header() {
 
       if (e.key === "Escape") {
         setOpenMenu(null); setProfileOpen(false); setUserMenuOpen(false); return;
+      }
+      if (e.key === "F1") {
+        e.preventDefault(); openDocsTab(); return;
       }
       // Ctrl+S — Save project
       if (ctrl && e.key.toLowerCase() === "s") {
@@ -394,7 +396,7 @@ export default function Header() {
         },
         {
           label: "Project Settings",
-          checked: settingsModalOpen,
+          checked: activeWorkspaceTab === "settings",
           action: openProjectSettings
         }
       ]
@@ -440,6 +442,20 @@ export default function Header() {
           action: () => setTerminalOpen(!terminalOpen)
         },
         { label: "Clear Run Output", disabled: !trace, action: clearTrace }
+      ]
+    },
+    {
+      id: "help",
+      label: "Help",
+      items: [
+        { label: "Open Docs",          action: openDocsTab },
+        { label: "Getting Started",    action: openDocsTab },
+        { label: "Node Types",         action: openDocsTab },
+        { label: "AI Providers",       action: openDocsTab },
+        { label: "Custom Providers",   action: openDocsTab },
+        { label: "Tools",              action: openDocsTab },
+        { type: "separator" },
+        { label: "Keyboard Shortcuts", shortcut: "F1", action: openDocsTab }
       ]
     }
   ];
@@ -518,13 +534,7 @@ export default function Header() {
       keywords: "select focus node workflow",
       action: () => selectAndFocusNode(node.id)
     })),
-    ...(session?.user ? [{ label: "Sign Out", detail: session.user.email, Icon: LogOut, keywords: "logout account", action: () => signOut({ callbackUrl: "/login" }) }] : []),
-    {
-      label: theme === "github-dark" ? "Switch to Default Theme" : "Switch to GitHub Dark Theme",
-      detail: "View", Icon: theme === "github-dark" ? Sun : Moon,
-      keywords: "theme dark light github appearance",
-      action: toggleTheme
-    }
+    ...(session?.user ? [{ label: "Sign Out", detail: session.user.email, Icon: LogOut, keywords: "logout account", action: () => signOut({ callbackUrl: "/login" }) }] : [])
   ];
 
   return (
@@ -637,13 +647,7 @@ export default function Header() {
           )}
         </div>
 
-        <button
-          onClick={toggleTheme}
-          className="flex h-7 w-7 items-center justify-center rounded text-muted transition hover:bg-canvasSoft hover:text-ink"
-          title={theme === "github-dark" ? "Switch to Default theme" : "Switch to GitHub Dark theme"}
-        >
-          {theme === "github-dark" ? <Sun size={14} /> : <Moon size={14} />}
-        </button>
+        <AnimatedThemeToggler />
 
         <div className="h-5 w-px bg-hairlineStrong" />
 
@@ -712,6 +716,6 @@ export default function Header() {
     </header>
 
     {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
-    </>
+</>
   );
 }

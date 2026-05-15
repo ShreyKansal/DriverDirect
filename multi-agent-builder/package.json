@@ -8,7 +8,11 @@
     "server": "node server/index.js",
     "server:dev": "nodemon server/index.js",
     "client": "npm run dev --prefix client",
-    "dev": "concurrently \"npm run server:dev\" \"npm run client\""
+    "dev": "concurrently \"npm run server:dev\" \"npm run client\"",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio",
+    "db:push": "drizzle-kit push"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
@@ -17,6 +21,7 @@
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
+    "drizzle-orm": "^0.45.2",
     "express": "^4.21.2",
     "nanoid": "^5.0.9",
     "openai": "^6.37.0",
@@ -24,6 +29,7 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
+    "drizzle-kit": "^0.31.10",
     "nodemon": "^3.1.9"
   }
 }

@@ -49,6 +49,7 @@ export const useWorkflowStore = create((set, get) => ({
   activeWorkspaceTab: "workflow",
   settingsTabOpen: false,
   settingsModalOpen: false,
+  docsTabOpen: false,
   canvasZoom: 1,
   canvasZoomRequest: null,  // "in" | "out" | "fit" | null
 
@@ -299,8 +300,16 @@ export const useWorkflowStore = create((set, get) => ({
       selectedNodeId: !state.showProjectSettings ? "" : state.selectedNodeId
     })),
   openProjectSettings: () =>
-    set({ settingsModalOpen: true, selectedNodeId: "" }),
-  closeSettingsModal: () => set({ settingsModalOpen: false }),
+    set({ settingsTabOpen: true, settingsModalOpen: false, activeWorkspaceTab: "settings", selectedNodeId: "" }),
+  closeSettingsModal: () =>
+    set((s) => ({
+      settingsTabOpen: false,
+      settingsModalOpen: false,
+      activeWorkspaceTab: s.workflowTabOpen ? "workflow" : null
+    })),
+  openDocsTab: () => set({ docsTabOpen: true, activeWorkspaceTab: "docs" }),
+  closeDocsTab: () =>
+    set((s) => ({ docsTabOpen: false, activeWorkspaceTab: s.workflowTabOpen ? "workflow" : null })),
   openWorkflowTab: () => set({ workflowTabOpen: true, activeWorkspaceTab: "workflow", showProjectSettings: false, settingsModalOpen: false }),
   closeWorkflowTab: () =>
     set((state) => ({

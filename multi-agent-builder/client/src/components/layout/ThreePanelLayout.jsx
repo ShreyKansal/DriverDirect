@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FileJson, FileText, Maximize2, Minus, Play, Plus, Settings2, X, ZoomIn } from "lucide-react";
+import { BookOpen, FileJson, FileText, Maximize2, Minus, Play, Plus, Settings2, X, ZoomIn } from "lucide-react";
 import ChatPanel from "../chat/ChatPanel.jsx";
 import ProjectExplorer from "../explorer/ProjectExplorer.jsx";
 import FlowCanvas from "../flow/FlowCanvas.jsx";
@@ -7,6 +7,7 @@ import OutputPanel from "../output/OutputPanel.jsx";
 import NodePalette from "./NodePalette.jsx";
 import RightPanel from "./RightPanel.jsx";
 import ProjectSettingsPanel from "../settings/ProjectSettingsPanel.jsx";
+import DocsPage from "../docs/DocsPage.jsx";
 import { useWorkflowStore } from "../../store/workflowStore.js";
 
 function useHorizResize(initial, min, max, inverted = false) {
@@ -51,9 +52,39 @@ function ResizeHandle({ onMouseDown, vertical = false }) {
   );
 }
 
+function SpecialTab({ label, icon: Icon, active, onClick, onClose }) {
+  return (
+    <div className="relative flex shrink-0">
+      <button
+        className={`group relative flex h-9 min-w-0 items-center gap-2 border-r border-hairline pr-7 pl-3 text-[12px] transition ${
+          active ? "bg-canvas text-ink" : "bg-panel text-muted hover:bg-canvasSoft hover:text-ink"
+        }`}
+        onClick={onClick}
+      >
+        {Icon && <Icon size={13} className="shrink-0" />}
+        {label}
+        {active && <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary" />}
+      </button>
+      <button
+        className={`absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-muted transition hover:!opacity-100 hover:bg-surfaceStrong hover:text-ink ${active ? "opacity-70" : "opacity-0 group-hover:opacity-70"}`}
+        onClick={(e) => { e.stopPropagation(); onClose(); }}
+      >
+        <X size={11} />
+      </button>
+    </div>
+  );
+}
+
 function WorkspaceTabs({ openTabs, activeProjectId, onSwitchProject, onCloseTab, showZoom }) {
   const canvasZoom        = useWorkflowStore((s) => s.canvasZoom);
   const requestCanvasZoom = useWorkflowStore((s) => s.requestCanvasZoom);
+  const activeWorkspaceTab = useWorkflowStore((s) => s.activeWorkspaceTab);
+  const settingsTabOpen   = useWorkflowStore((s) => s.settingsTabOpen);
+  const docsTabOpen       = useWorkflowStore((s) => s.docsTabOpen);
+  const openProjectSettings = useWorkflowStore((s) => s.openProjectSettings);
+  const closeSettingsModal  = useWorkflowStore((s) => s.closeSettingsModal);
+  const openDocsTab         = useWorkflowStore((s) => s.openDocsTab);
+  const closeDocsTab        = useWorkflowStore((s) => s.closeDocsTab);
 
   const tabClass = (active) =>
     `group relative flex h-9 min-w-0 items-center gap-2 border-r border-hairline px-3 text-[12px] transition ${
@@ -64,7 +95,7 @@ function WorkspaceTabs({ openTabs, activeProjectId, onSwitchProject, onCloseTab,
     <div className="flex h-9 shrink-0 items-stretch border-b border-hairline bg-panel">
       <div className="flex min-w-0 flex-1 overflow-x-auto">
         {openTabs.map((proj) => {
-          const active = proj.id === activeProjectId;
+          const active = proj.id === activeProjectId && activeWorkspaceTab === "workflow";
           return (
             <div key={proj.id} className="relative flex shrink-0">
               <button
@@ -77,7 +108,7 @@ function WorkspaceTabs({ openTabs, activeProjectId, onSwitchProject, onCloseTab,
                 {active && <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary" />}
               </button>
               <button
-                className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-muted opacity-0 transition group-hover:opacity-70 hover:!opacity-100 hover:bg-surfaceStrong hover:text-ink"
+                className={`absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-muted transition hover:!opacity-100 hover:bg-surfaceStrong hover:text-ink ${active ? "opacity-70" : "opacity-0 group-hover:opacity-70"}`}
                 onClick={(e) => { e.stopPropagation(); onCloseTab(proj.id); }}
                 title="Close tab"
               >
@@ -86,6 +117,24 @@ function WorkspaceTabs({ openTabs, activeProjectId, onSwitchProject, onCloseTab,
             </div>
           );
         })}
+        {settingsTabOpen && (
+          <SpecialTab
+            label="Settings"
+            icon={Settings2}
+            active={activeWorkspaceTab === "settings"}
+            onClick={openProjectSettings}
+            onClose={closeSettingsModal}
+          />
+        )}
+        {docsTabOpen && (
+          <SpecialTab
+            label="Documentation"
+            icon={BookOpen}
+            active={activeWorkspaceTab === "docs"}
+            onClick={openDocsTab}
+            onClose={closeDocsTab}
+          />
+        )}
       </div>
 
       {/* Zoom controls — shown only when canvas is active */}
@@ -166,7 +215,6 @@ export default function AppLayout() {
   const activePanel = useWorkflowStore((s) => s.activePanel);
   const workflowTabOpen = useWorkflowStore((s) => s.workflowTabOpen);
   const activeWorkspaceTab = useWorkflowStore((s) => s.activeWorkspaceTab);
-  const settingsModalOpen = useWorkflowStore((s) => s.settingsModalOpen);
   const toggleActivePanel = useWorkflowStore((s) => s.toggleActivePanel);
   const setTerminalOpen = useWorkflowStore((s) => s.setTerminalOpen);
   const toggleTerminalOpen = useWorkflowStore((s) => s.toggleTerminalOpen);
@@ -236,8 +284,8 @@ export default function AppLayout() {
       if (e.key === "Delete" && !inInput() && selectedNodeId) {
         e.preventDefault(); deleteNode(selectedNodeId); return;
       }
-      // Escape — Clear canvas selection (not in modal, not in text field)
-      if (e.key === "Escape" && !inInput() && !settingsModalOpen && selectedNodeId) {
+      // Escape — Clear canvas selection (not in text field, not on settings/docs tab)
+      if (e.key === "Escape" && !inInput() && activeWorkspaceTab === "workflow" && selectedNodeId) {
         selectNode("");
       }
     };
@@ -248,15 +296,8 @@ export default function AppLayout() {
     toggleTerminalOpen, running, startRun, openProjectSettings,
     toggleActivePanel, openWorkflowTab, autoLayoutWorkflow,
     createProject, selectedNodeId, duplicateNode, deleteNode,
-    selectNode, settingsModalOpen
+    selectNode, activeWorkspaceTab
   ]);
-
-  useEffect(() => {
-    if (!settingsModalOpen) return;
-    const handler = (e) => { if (e.key === "Escape") closeSettingsModal(); };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [settingsModalOpen, closeSettingsModal]);
 
   const [explorerW, onExplorerDrag]  = useHorizResize(224, 160, 360);
   const [inspectorW, onInspectorDrag] = useHorizResize(320, 240, 480, true);
@@ -289,7 +330,7 @@ export default function AppLayout() {
       {/* Activity bar */}
       <NodePalette
         activePanel={activePanel}
-        projectSettingsActive={settingsModalOpen}
+        projectSettingsActive={activeWorkspaceTab === "settings"}
         onPanelToggle={toggleActivePanel}
         onProjectSettings={openProjectSettings}
       />
@@ -312,17 +353,7 @@ export default function AppLayout() {
           onCloseTab={closeTab}
           showZoom={activeWorkspaceTab === "workflow"}
         />
-        {activeWorkspaceTab !== "workflow" ? (
-          <EmptyWorkspace
-            workflowName={workflow.name}
-            running={running}
-            onOpenWorkflow={openWorkflowTab}
-            onOpenSettings={openProjectSettings}
-            onNewProject={() => createProject("New Project")}
-            onImportJson={() => importInputRef.current?.click()}
-            onRun={startRun}
-          />
-        ) : (
+        {activeWorkspaceTab === "workflow" ? (
           <div className="flex min-h-0 flex-1">
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
               <div className="relative min-h-0 flex-1 overflow-hidden">
@@ -339,29 +370,31 @@ export default function AppLayout() {
               </div>
               {terminalOpen && <OutputPanel onClose={() => setTerminalOpen(false)} />}
             </div>
-
             <ResizeHandle onMouseDown={onInspectorDrag} />
-
             <div style={{ width: inspectorW }} className="flex shrink-0 flex-col">
-              <RightPanel
-                showProject={false}
-                onProjectSettings={openProjectSettings}
-              />
+              <RightPanel showProject={false} onProjectSettings={openProjectSettings} />
             </div>
           </div>
-        )}
-      </div>
-      {settingsModalOpen && (
-        <>
-          <div
-            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px]"
-            onClick={closeSettingsModal}
-          />
-          <div className="fixed left-1/2 top-1/2 z-50 flex h-[min(740px,90vh)] w-[min(1080px,92vw)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-hairline bg-canvas shadow-2xl">
+        ) : activeWorkspaceTab === "settings" ? (
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <ProjectSettingsPanel onClose={closeSettingsModal} />
           </div>
-        </>
-      )}
+        ) : activeWorkspaceTab === "docs" ? (
+          <div className="flex min-h-0 flex-1 overflow-hidden">
+            <DocsPage />
+          </div>
+        ) : (
+          <EmptyWorkspace
+            workflowName={workflow.name}
+            running={running}
+            onOpenWorkflow={openWorkflowTab}
+            onOpenSettings={openProjectSettings}
+            onNewProject={() => createProject("New Project")}
+            onImportJson={() => importInputRef.current?.click()}
+            onRun={startRun}
+          />
+        )}
+      </div>
     </main>
   );
 }

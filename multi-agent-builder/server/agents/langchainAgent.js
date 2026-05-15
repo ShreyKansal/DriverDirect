@@ -91,7 +91,7 @@ async function executeSingleTool(toolName, toolInput, toolCallId, config, runId,
 export class LangChainAgent extends BaseAgent {
   async run({ userTask, previousOutputs = [], workflowContext = {}, runId, onEvent }) {
     try {
-      const model        = createChatModel(this.config, workflowContext.projectKeys || {});
+      const model        = createChatModel(this.config, workflowContext.projectKeys || {}, workflowContext.customProviders || {});
       const systemPrompt = buildSystemPrompt(this.config, workflowContext);
       const userMessage  = buildUserMessage({ agentConfig: this.config, userTask, previousOutputs, workflowContext });
 

@@ -65,4 +65,20 @@ export async function migrate() {
       PRIMARY KEY (project_id, provider_id)
     )
   `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS custom_providers (
+      id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+      project_id       TEXT        NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      name             TEXT        NOT NULL,
+      type             TEXT        NOT NULL CHECK (type IN ('openai-compat', 'local', 'custom-http')),
+      base_url         TEXT        NOT NULL,
+      auth_header_name TEXT        NOT NULL DEFAULT 'Authorization',
+      models           JSONB       NOT NULL DEFAULT '[]',
+      request_template TEXT,
+      response_path    TEXT,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
 }

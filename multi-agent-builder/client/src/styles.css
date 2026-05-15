@@ -48,45 +48,49 @@
   --term-btn-hover: #31363b;
 }
 
-[data-theme="github-dark"] {
+.dark {
   color-scheme: dark;
-  --color-canvas: 31 36 40;
-  --color-canvas-soft: 40 46 52;
-  --color-panel: 36 41 46;
-  --color-surface-strong: 43 48 54;
-  --color-hairline: 27 31 35;
-  --color-hairline-soft: 47 54 61;
-  --color-hairline-strong: 68 77 86;
-  --color-ink: 225 228 232;
-  --color-body: 209 213 218;
-  --color-muted: 149 157 165;
-  --color-muted-soft: 106 115 125;
-  --color-primary: 249 130 108;
-  --color-primary-active: 234 106 82;
-  --color-timeline-thinking: 255 171 112;
-  --color-timeline-grep: 133 232 157;
-  --color-timeline-read: 121 184 255;
-  --color-timeline-edit: 179 146 240;
-  --color-timeline-done: 249 130 108;
-  --color-success: 52 208 88;
-  --color-error: 234 74 90;
-  /* Terminal — GitHub Dark exact values from dark.json */
-  --term-bg: #24292e;
-  --term-bar: #1f2428;
-  --term-sidebar: #1f2428;
-  --term-hover: #282e34;
-  --term-active: #2f363d;
-  --term-border: #1b1f23;
-  --term-border-sub: #2f363d;
-  --term-active-text: #e1e4e8;
-  --term-text: #d1d5da;
-  --term-muted: #959da5;
-  --term-dim: #6a737d;
-  --term-green: #85e89d;
-  --term-yellow: #ffea7f;
-  --term-red: #f97583;
-  --term-btn-hover: #282e34;
+  --color-canvas: 30 29 26;
+  --color-canvas-soft: 35 34 30;
+  --color-panel: 40 39 35;
+  --color-surface-strong: 52 51 46;
+  --color-hairline: 58 57 52;
+  --color-hairline-soft: 48 47 42;
+  --color-hairline-strong: 74 72 66;
+  --color-ink: 238 236 228;
+  --color-body: 168 165 154;
+  --color-muted: 112 110 102;
+  --color-muted-soft: 78 76 70;
+  --color-primary: 230 0 0;
+  --color-primary-active: 255 38 38;
+  --color-timeline-thinking: 223 168 143;
+  --color-timeline-grep: 159 201 162;
+  --color-timeline-read: 159 187 224;
+  --color-timeline-edit: 192 168 221;
+  --color-timeline-done: 192 133 50;
+  --color-success: 31 138 101;
+  --color-error: 207 45 86;
 }
+
+/* View Transitions — disable default cross-fade so our clip-path runs */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-new(root) {
+  z-index: 1;
+}
+::view-transition-old(root) {
+  z-index: 9999;
+}
+.dark::view-transition-new(root) {
+  z-index: 9999;
+}
+.dark::view-transition-old(root) {
+  z-index: 1;
+}
+
 
 @keyframes flow-dash {
   to { stroke-dashoffset: -24; }

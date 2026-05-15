@@ -23,29 +23,40 @@ export default function ModelSettings({ agent, update }) {
   const [configuredIds, setConfiguredIds] = useState(new Set());
 
   useEffect(() => {
-    const requests = [fetch("/api/agents/providers").then((response) => response.json())];
+    const provUrl = keyProjectId
+      ? `/api/agents/providers?projectId=${keyProjectId}`
+      : "/api/agents/providers";
+
+    const requests = [fetch(provUrl).then((r) => r.json())];
     if (keyProjectId) {
-      requests.push(fetch(`/api/projects/${keyProjectId}/keys`).then((response) => response.json()));
+      requests.push(fetch(`/api/projects/${keyProjectId}/keys`).then((r) => r.json()));
     }
 
     Promise.all(requests)
       .then(([{ providers }, keysRes]) => {
         if (providers?.length) setAllProviders(providers);
         const ids = new Set((keysRes?.configured || []).map((entry) => entry.providerId));
+        // Local custom providers don't need a key — always mark them as "configured"
+        for (const p of providers || []) {
+          if (p.isCustom && p.type === "local") ids.add(p.id);
+        }
         setConfiguredIds(ids);
       })
       .catch(() => {});
   }, [keyProjectId]);
 
   const currentProvider = agent.provider || "groq";
-  const providerData = allProviders.find((provider) => provider.id === currentProvider) || allProviders[0];
+  const providerData = allProviders.find((p) => p.id === currentProvider) || allProviders[0];
   const modelList = providerData?.models || [];
 
-  const providerOptions = allProviders.map((provider) => ({ value: provider.id, label: provider.name }));
-  const modelOptions = modelList.map((model) => ({ value: model.id, label: model.name || model.id }));
+  const providerOptions = allProviders.map((p) => ({
+    value: p.id,
+    label: p.isCustom ? `${p.name} (Custom)` : p.name
+  }));
+  const modelOptions = modelList.map((m) => ({ value: m.id, label: m.name || m.id }));
 
   function handleProviderChange(newProvider) {
-    const provider = allProviders.find((item) => item.id === newProvider);
+    const provider = allProviders.find((p) => p.id === newProvider);
     update({ provider: newProvider, model: provider?.models[0]?.id || "" });
   }
 
@@ -89,7 +100,7 @@ export default function ModelSettings({ agent, update }) {
             max="2"
             step="0.1"
             value={agent.temperature}
-            onChange={(event) => update({ temperature: Number(event.target.value) })}
+            onChange={(e) => update({ temperature: Number(e.target.value) })}
           />
         </label>
         <label className="field col-span-2">
@@ -99,7 +110,7 @@ export default function ModelSettings({ agent, update }) {
             type="number"
             min="1"
             value={agent.maxTokens}
-            onChange={(event) => update({ maxTokens: Number(event.target.value) })}
+            onChange={(e) => update({ maxTokens: Number(e.target.value) })}
           />
         </label>
       </div>

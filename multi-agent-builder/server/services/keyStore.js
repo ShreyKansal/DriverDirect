@@ -1,12 +1,13 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
-import { query } from "../db/index.js";
+import { and, eq } from "drizzle-orm";
+import { db } from "../db/index.js";
+import { projectApiKeys } from "../db/schema.js";
 import { env } from "../config/env.js";
 
 const ALGORITHM = "aes-256-gcm";
 
 function encrypt(plaintext) {
   if (!env.encryptionKey) {
-    // No encryption key set — store as-is with a dev-mode prefix
     if (!_warnedOnce) {
       console.warn("[keyStore] ENCRYPTION_KEY not set — API keys stored unencrypted. Set ENCRYPTION_KEY in .env for production.");
       _warnedOnce = true;
@@ -37,54 +38,66 @@ let _warnedOnce = false;
 
 export async function setProjectKey(projectId, providerId, apiKey) {
   const encryptedKey = encrypt(apiKey);
-  await query(
-    `INSERT INTO project_api_keys (project_id, provider_id, encrypted_key, updated_at)
-     VALUES ($1, $2, $3, NOW())
-     ON CONFLICT (project_id, provider_id)
-     DO UPDATE SET encrypted_key = $3, updated_at = NOW()`,
-    [projectId, providerId, encryptedKey]
-  );
+  const now = new Date();
+
+  await db
+    .insert(projectApiKeys)
+    .values({ projectId, providerId, encryptedKey, createdAt: now, updatedAt: now })
+    .onConflictDoUpdate({
+      target: [projectApiKeys.projectId, projectApiKeys.providerId],
+      set: { encryptedKey, updatedAt: now }
+    });
 }
 
 export async function deleteProjectKey(projectId, providerId) {
-  await query(
-    `DELETE FROM project_api_keys WHERE project_id = $1 AND provider_id = $2`,
-    [projectId, providerId]
-  );
+  await db
+    .delete(projectApiKeys)
+    .where(
+      and(
+        eq(projectApiKeys.projectId, projectId),
+        eq(projectApiKeys.providerId, providerId)
+      )
+    );
 }
 
 // Returns { providerId → decryptedKey } for all configured providers in a project
 export async function getProjectKeys(projectId) {
-  const result = await query(
-    `SELECT provider_id, encrypted_key FROM project_api_keys WHERE project_id = $1`,
-    [projectId]
-  );
+  const rows = await db
+    .select({ providerId: projectApiKeys.providerId, encryptedKey: projectApiKeys.encryptedKey })
+    .from(projectApiKeys)
+    .where(eq(projectApiKeys.projectId, projectId));
+
   const keys = {};
-  for (const row of result.rows) {
+  for (const row of rows) {
     try {
-      keys[row.provider_id] = decrypt(row.encrypted_key);
+      keys[row.providerId] = decrypt(row.encryptedKey);
     } catch {
-      // Skip corrupted/invalid key entries
+      // Skip corrupted / invalid key entries
     }
   }
   return keys;
 }
 
-// Returns list of configured provider IDs for a project (with masked key preview)
+// Returns list of configured provider IDs for a project (with masked key previews)
 export async function getProjectKeyStatus(projectId) {
-  const result = await query(
-    `SELECT provider_id, encrypted_key, updated_at FROM project_api_keys WHERE project_id = $1`,
-    [projectId]
-  );
-  return result.rows.map((row) => {
+  const rows = await db
+    .select({
+      providerId:   projectApiKeys.providerId,
+      encryptedKey: projectApiKeys.encryptedKey,
+      updatedAt:    projectApiKeys.updatedAt
+    })
+    .from(projectApiKeys)
+    .where(eq(projectApiKeys.projectId, projectId));
+
+  return rows.map((row) => {
     let preview = "";
     try {
-      const raw = decrypt(row.encrypted_key);
+      const raw = decrypt(row.encryptedKey);
       preview = raw.length > 8 ? raw.slice(0, 6) + "••••••••" : "••••••••";
     } catch {
       preview = "••••••••";
     }
-    return { providerId: row.provider_id, preview, updatedAt: row.updated_at };
+    return { providerId: row.providerId, preview, updatedAt: row.updatedAt };
   });
 }
 

@@ -1,28 +1,45 @@
 import bcrypt from "bcryptjs";
-import { query } from "../db/index.js";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { db } from "../db/index.js";
+import { users, passwordResetTokens } from "../db/schema.js";
 
 export async function upsertUser(user) {
-  const now = new Date().toISOString();
-  await query(
-    `INSERT INTO users (id, email, name, picture, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     ON CONFLICT (id) DO UPDATE SET
-       email      = EXCLUDED.email,
-       name       = EXCLUDED.name,
-       picture    = EXCLUDED.picture,
-       updated_at = EXCLUDED.updated_at`,
-    [user.id, user.email, user.name || "", user.picture || "", now, now]
-  );
+  const now = new Date();
+  await db
+    .insert(users)
+    .values({
+      id:        user.id,
+      email:     user.email,
+      name:      user.name    || "",
+      picture:   user.picture || "",
+      createdAt: now,
+      updatedAt: now
+    })
+    .onConflictDoUpdate({
+      target: users.id,
+      set: {
+        email:     user.email,
+        name:      user.name    || "",
+        picture:   user.picture || "",
+        updatedAt: now
+      }
+    });
   return user;
 }
 
 export async function getUserByEmail(email) {
-  const { rows } = await query(
-    `SELECT id, email, name, picture, password_hash FROM users WHERE email = $1`,
-    [email]
-  );
-  return rows[0] || null;
+  const [row] = await db
+    .select({
+      id:           users.id,
+      email:        users.email,
+      name:         users.name,
+      picture:      users.picture,
+      passwordHash: users.passwordHash
+    })
+    .from(users)
+    .where(eq(users.email, email));
+  return row || null;
 }
 
 export async function registerUser({ email, name, password }) {
@@ -31,48 +48,60 @@ export async function registerUser({ email, name, password }) {
 
   const hash = await bcrypt.hash(password, 12);
   const id   = nanoid();
-  const now  = new Date().toISOString();
+  const now  = new Date();
 
-  await query(
-    `INSERT INTO users (id, email, name, password_hash, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [id, email, name || "", hash, now, now]
-  );
+  await db.insert(users).values({
+    id,
+    email,
+    name:         name || "",
+    passwordHash: hash,
+    createdAt:    now,
+    updatedAt:    now
+  });
   return { id, email, name: name || "" };
 }
 
 export async function verifyUser(email, password) {
   const user = await getUserByEmail(email);
-  if (!user || !user.password_hash) return null;
-  const match = await bcrypt.compare(password, user.password_hash);
+  if (!user || !user.passwordHash) return null;
+  const match = await bcrypt.compare(password, user.passwordHash);
   return match ? { id: user.id, email: user.email, name: user.name } : null;
 }
 
 export async function createResetToken(email) {
   const user = await getUserByEmail(email);
-  if (!user) return null; // silently succeed so we don't leak whether email exists
+  if (!user) return null; // silently succeed — don't leak whether email exists
 
   const token     = nanoid(48);
   const id        = nanoid();
-  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
-  await query(
-    `INSERT INTO password_reset_tokens (id, user_id, token, expires_at)
-     VALUES ($1, $2, $3, $4)`,
-    [id, user.id, token, expiresAt]
-  );
+  await db.insert(passwordResetTokens).values({
+    id,
+    userId:    user.id,
+    token,
+    expiresAt
+  });
   return { token, email: user.email };
 }
 
 export async function validateResetToken(token) {
-  const { rows } = await query(
-    `SELECT t.id, t.user_id, u.email
-     FROM password_reset_tokens t
-     JOIN users u ON u.id = t.user_id
-     WHERE t.token = $1 AND t.used = FALSE AND t.expires_at > NOW()`,
-    [token]
-  );
-  return rows[0] || null;
+  const [row] = await db
+    .select({
+      id:     passwordResetTokens.id,
+      userId: passwordResetTokens.userId,
+      email:  users.email
+    })
+    .from(passwordResetTokens)
+    .innerJoin(users, eq(users.id, passwordResetTokens.userId))
+    .where(
+      and(
+        eq(passwordResetTokens.token, token),
+        eq(passwordResetTokens.used, false),
+        gt(passwordResetTokens.expiresAt, sql`NOW()`)
+      )
+    );
+  return row || null;
 }
 
 export async function consumeResetToken(token, newPassword) {
@@ -80,6 +109,14 @@ export async function consumeResetToken(token, newPassword) {
   if (!record) throw new Error("Reset link is invalid or has expired.");
 
   const hash = await bcrypt.hash(newPassword, 12);
-  await query(`UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2`, [hash, record.user_id]);
-  await query(`UPDATE password_reset_tokens SET used = TRUE WHERE token = $1`, [token]);
+
+  await db
+    .update(users)
+    .set({ passwordHash: hash, updatedAt: new Date() })
+    .where(eq(users.id, record.userId));
+
+  await db
+    .update(passwordResetTokens)
+    .set({ used: true })
+    .where(eq(passwordResetTokens.token, token));
 }

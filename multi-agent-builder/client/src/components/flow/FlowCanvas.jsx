@@ -13,6 +13,77 @@ const ZOOM_MIN    = 0.15;
 const ZOOM_MAX    = 2.0;
 const ZOOM_FACTOR = 0.12;
 
+// Column gap wide enough that bezier curves between adjacent columns
+// never intersect nodes that sit in those columns.
+const LAYOUT_COL_GAP = 120;
+const LAYOUT_ROW_GAP = 50;
+
+// ─── DAG auto-layout ──────────────────────────────────────────────────────────
+// Places non-tool nodes in left-to-right columns based on longest-path
+// topological depth, then runs 3 barycenter passes to pull each column's nodes
+// toward their neighbours, minimising edge crossings.
+
+function computeDagLayout(nodes, edges) {
+  const mainNodes = nodes.filter(n => n.type !== "tool");
+  if (!mainNodes.length) return {};
+  const flowEdges = edges.filter(e => e.type !== "tool");
+
+  const childrenOf = Object.fromEntries(mainNodes.map(n => [n.id, []]));
+  const parentsOf  = Object.fromEntries(mainNodes.map(n => [n.id, []]));
+  flowEdges.forEach(e => {
+    if (childrenOf[e.source] !== undefined) childrenOf[e.source].push(e.target);
+    if (parentsOf[e.target]  !== undefined) parentsOf[e.target].push(e.source);
+  });
+
+  // Longest-path pass: col[id] = depth from any root
+  const col   = Object.fromEntries(mainNodes.map(n => [n.id, 0]));
+  const inDeg = Object.fromEntries(mainNodes.map(n => [n.id, parentsOf[n.id].length]));
+  const queue = mainNodes.filter(n => inDeg[n.id] === 0).map(n => n.id);
+  while (queue.length) {
+    const id = queue.shift();
+    (childrenOf[id] || []).forEach(cid => {
+      col[cid] = Math.max(col[cid], col[id] + 1);
+      if (--inDeg[cid] <= 0) queue.push(cid);
+    });
+  }
+
+  const byCol = {};
+  mainNodes.forEach(n => { const c = col[n.id] ?? 0; (byCol[c] = byCol[c] || []).push(n); });
+  const colKeys = Object.keys(byCol).sort((a, b) => +a - +b);
+
+  const positions = {};
+  function placeCol(c) {
+    const colNodes = byCol[c];
+    const x      = +c * (NODE_WIDTH + LAYOUT_COL_GAP) + 40;
+    const totalH = colNodes.length * NODE_HEIGHT + (colNodes.length - 1) * LAYOUT_ROW_GAP;
+    const startY = Math.max(40, 300 - totalH / 2);
+    colNodes.forEach((n, i) => {
+      positions[n.id] = { x, y: startY + i * (NODE_HEIGHT + LAYOUT_ROW_GAP) };
+    });
+  }
+
+  colKeys.forEach(c => placeCol(c));
+
+  // Barycenter passes: sort each column by avg-y of neighbours → fewer crossings
+  for (let pass = 0; pass < 3; pass++) {
+    colKeys.forEach(c => {
+      const colNodes = byCol[c];
+      if (colNodes.length <= 1) return;
+      colNodes.sort((a, b) => {
+        const bary = id => {
+          const nbrs = [...(childrenOf[id] || []), ...(parentsOf[id] || [])]
+            .map(nid => positions[nid]?.y ?? 0);
+          return nbrs.length ? nbrs.reduce((s, y) => s + y, 0) / nbrs.length : 0;
+        };
+        return bary(a.id) - bary(b.id);
+      });
+      placeCol(c);
+    });
+  }
+
+  return positions;
+}
+
 // ─── small helpers ────────────────────────────────────────────────────────────
 
 function nodeW(node) { return node.type === "tool" ? TOOL_NODE_WIDTH  : NODE_WIDTH;  }
@@ -104,6 +175,24 @@ export default function FlowCanvas() {
     if (canvasZoomRequest === "fit") fitView();
     clearCanvasZoomRequest();
   });
+
+  // ── Auto-layout ───────────────────────────────────────────────────────────────
+  // Re-runs only when graph structure changes (node ids or edge connections).
+  // Excludes tool nodes; position-only changes don't alter structureKey so there
+  // is no re-trigger / infinite loop.
+  const structureKey = [
+    ...workflow.nodes.filter(n => n.type !== "tool").map(n => n.id),
+    ...workflow.edges.filter(e => e.type !== "tool").map(e => `${e.source}>${e.target}`)
+  ].join("|");
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!workflow.nodes.length) return;
+    const positions = computeDagLayout(workflow.nodes, workflow.edges);
+    Object.entries(positions).forEach(([id, pos]) => updateNode(id, { position: pos }));
+    // Fit view after positions settle
+    setTimeout(fitView, 60);
+  }, [structureKey]);
 
   // ── fit all nodes into view ──────────────────────────────────────────────────
   function fitView() {
@@ -202,7 +291,7 @@ export default function FlowCanvas() {
   const nodeById        = new Map(workflow.nodes.map((n) => [n.id, n]));
   const highlightNodeId = selectedNodeId || hoveredNodeId;
 
-  // ── Edge routing — all edges right→left, fan at shared ports ────────────────
+  // ── Edge routing — fan shared ports ─────────────────────────────────────────
   const flowEdges = workflow.edges.filter((e) => e.type !== "tool");
 
   const edgeOffsets = (() => {
@@ -210,7 +299,6 @@ export default function FlowCanvas() {
     const MAX_SPREAD = 30;
 
     function fan(edgeId, nodeId, role) {
-      // role: "src" = all outgoing from nodeId, "tgt" = all incoming to nodeId
       const siblings = flowEdges
         .filter((e) => role === "src" ? e.source === nodeId : e.target === nodeId)
         .sort((a, b) => {
@@ -313,10 +401,9 @@ export default function FlowCanvas() {
               d = `M ${s.x} ${s.y} C ${s.x + ctrl} ${s.y}, ${eAdj.x - ctrl} ${eAdj.y}, ${eAdj.x} ${eAdj.y}`;
             } else {
               // Backward (right→left): arc upward to avoid crossing forward edges.
-              // Arc height proportional to horizontal gap, fanned siblings get extra offset.
-              const hGap   = s.x - eAdj.x;
-              const vGap   = Math.abs(s.y - eAdj.y);
-              const arcH   = -(Math.min(110, hGap * 0.22 + vGap * 0.15 + 40) + Math.abs(off.src) * 2);
+              const hGap = s.x - eAdj.x;
+              const vGap = Math.abs(s.y - eAdj.y);
+              const arcH = -(Math.min(110, hGap * 0.22 + vGap * 0.15 + 40) + Math.abs(off.src) * 2);
               d = `M ${s.x} ${s.y} C ${s.x} ${s.y + arcH}, ${eAdj.x} ${eAdj.y + arcH}, ${eAdj.x} ${eAdj.y}`;
             }
 
