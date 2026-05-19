@@ -10,6 +10,13 @@ import {
 
 const router = express.Router();
 
+function isDbError(err) {
+  return err?.code === "ECONNRESET" || err?.code === "ECONNREFUSED" ||
+         err?.cause?.code === "ECONNRESET" || err?.cause?.code === "ECONNREFUSED" ||
+         err?.message?.includes("ECONNRESET") || err?.message?.includes("ECONNREFUSED") ||
+         err?.message?.includes("connect") || err?.constructor?.name === "DrizzleQueryError";
+}
+
 // Called by App.jsx after Google sign-in to persist the user in Postgres
 router.post("/sync", async (req, res, next) => {
   try {
@@ -18,6 +25,7 @@ router.post("/sync", async (req, res, next) => {
     await upsertUser({ id: id || email, email, name, picture });
     res.json({ status: "ok" });
   } catch (error) {
+    if (isDbError(error)) return res.json({ status: "ok" });
     next(error);
   }
 });
@@ -35,8 +43,11 @@ router.post("/register", async (req, res, next) => {
     const user = await registerUser({ email: email.toLowerCase().trim(), name, password });
     res.json({ status: "ok", user });
   } catch (error) {
-    if (error.message.includes("already exists")) {
+    if (error.message?.includes("already exists")) {
       return res.status(409).json({ status: "error", message: error.message });
+    }
+    if (isDbError(error)) {
+      return res.status(503).json({ status: "error", message: "Database unavailable." });
     }
     next(error);
   }
@@ -53,6 +64,9 @@ router.post("/verify", async (req, res, next) => {
     if (!user) return res.status(401).json({ status: "error", message: "Invalid email or password." });
     res.json({ status: "ok", user });
   } catch (error) {
+    if (isDbError(error)) {
+      return res.status(503).json({ status: "error", message: "Database unavailable." });
+    }
     next(error);
   }
 });
@@ -65,26 +79,24 @@ router.post("/forgot-password", async (req, res, next) => {
 
     const result = await createResetToken(email.toLowerCase().trim());
     if (result) {
-      // TODO: send email via nodemailer or similar
-      // For now, log the link so you can test without an SMTP server
-      const link = `${process.env.NEXTAUTH_URL || "http://localhost:5173"}/reset-password?token=${result.token}`;
+      const link = `${process.env.NEXTAUTH_URL || "http://localhost:3000"}/reset-password?token=${result.token}`;
       console.log(`[Password Reset] Link for ${result.email}: ${link}`);
     }
-
-    // Always return success so we don't leak which emails are registered
     res.json({ status: "ok", message: "If that email is registered, a reset link has been sent." });
   } catch (error) {
+    if (isDbError(error)) return res.json({ status: "ok", message: "If that email is registered, a reset link has been sent." });
     next(error);
   }
 });
 
-// Validate token (called by the reset-password page on load to give early feedback)
+// Validate token
 router.get("/reset-password/:token", async (req, res, next) => {
   try {
     const record = await validateResetToken(req.params.token);
     if (!record) return res.status(400).json({ status: "error", message: "Invalid or expired reset link." });
     res.json({ status: "ok", email: record.email });
   } catch (error) {
+    if (isDbError(error)) return res.status(503).json({ status: "error", message: "Database unavailable." });
     next(error);
   }
 });
@@ -102,9 +114,10 @@ router.post("/reset-password", async (req, res, next) => {
     await consumeResetToken(token, password);
     res.json({ status: "ok", message: "Password updated. You can now sign in." });
   } catch (error) {
-    if (error.message.includes("Invalid or has expired")) {
+    if (error.message?.includes("Invalid or has expired")) {
       return res.status(400).json({ status: "error", message: error.message });
     }
+    if (isDbError(error)) return res.status(503).json({ status: "error", message: "Database unavailable." });
     next(error);
   }
 });

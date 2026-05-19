@@ -1,43 +1,39 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { projectApiKeys } from "../db/schema.js";
-import { env } from "../config/env.js";
+import { decryptString, encryptString } from "./cryptoStore.js";
 
-const ALGORITHM = "aes-256-gcm";
+const GLOBAL_SCOPE_PREFIX = "__global__:";
 
-function encrypt(plaintext) {
-  if (!env.encryptionKey) {
-    if (!_warnedOnce) {
-      console.warn("[keyStore] ENCRYPTION_KEY not set — API keys stored unencrypted. Set ENCRYPTION_KEY in .env for production.");
-      _warnedOnce = true;
-    }
-    return "plain:" + plaintext;
-  }
-  const key = Buffer.from(env.encryptionKey, "hex");
-  const iv  = randomBytes(12);
-  const cipher = createCipheriv(ALGORITHM, key, iv);
-  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  const authTag = cipher.getAuthTag();
-  return [iv.toString("hex"), authTag.toString("hex"), encrypted.toString("hex")].join(":");
+function globalScopeId(userId) {
+  return `${GLOBAL_SCOPE_PREFIX}${userId || "anonymous"}`;
 }
 
-function decrypt(stored) {
-  if (stored.startsWith("plain:")) return stored.slice(6);
-  const [ivHex, authTagHex, encryptedHex] = stored.split(":");
-  const key = Buffer.from(env.encryptionKey, "hex");
-  const iv = Buffer.from(ivHex, "hex");
-  const authTag = Buffer.from(authTagHex, "hex");
-  const encrypted = Buffer.from(encryptedHex, "hex");
-  const decipher = createDecipheriv(ALGORITHM, key, iv);
-  decipher.setAuthTag(authTag);
-  return decipher.update(encrypted) + decipher.final("utf8");
+function maskPreview(rawKey) {
+  if (!rawKey) return "********";
+  return rawKey.length > 8 ? `${rawKey.slice(0, 6)}********` : "********";
 }
 
-let _warnedOnce = false;
+async function getKeyRow(projectId, providerId) {
+  const [row] = await db
+    .select({
+      providerId: projectApiKeys.providerId,
+      encryptedKey: projectApiKeys.encryptedKey,
+      updatedAt: projectApiKeys.updatedAt,
+    })
+    .from(projectApiKeys)
+    .where(
+      and(
+        eq(projectApiKeys.projectId, projectId),
+        eq(projectApiKeys.providerId, providerId),
+      ),
+    );
+
+  return row || null;
+}
 
 export async function setProjectKey(projectId, providerId, apiKey) {
-  const encryptedKey = encrypt(apiKey);
+  const encryptedKey = encryptString(apiKey);
   const now = new Date();
 
   await db
@@ -45,7 +41,7 @@ export async function setProjectKey(projectId, providerId, apiKey) {
     .values({ projectId, providerId, encryptedKey, createdAt: now, updatedAt: now })
     .onConflictDoUpdate({
       target: [projectApiKeys.projectId, projectApiKeys.providerId],
-      set: { encryptedKey, updatedAt: now }
+      set: { encryptedKey, updatedAt: now },
     });
 }
 
@@ -55,12 +51,22 @@ export async function deleteProjectKey(projectId, providerId) {
     .where(
       and(
         eq(projectApiKeys.projectId, projectId),
-        eq(projectApiKeys.providerId, providerId)
-      )
+        eq(projectApiKeys.providerId, providerId),
+      ),
     );
 }
 
-// Returns { providerId → decryptedKey } for all configured providers in a project
+export async function getProjectKey(projectId, providerId) {
+  const row = await getKeyRow(projectId, providerId);
+  if (!row) return null;
+
+  return {
+    providerId: row.providerId,
+    apiKey: decryptString(row.encryptedKey),
+    updatedAt: row.updatedAt,
+  };
+}
+
 export async function getProjectKeys(projectId) {
   const rows = await db
     .select({ providerId: projectApiKeys.providerId, encryptedKey: projectApiKeys.encryptedKey })
@@ -70,32 +76,30 @@ export async function getProjectKeys(projectId) {
   const keys = {};
   for (const row of rows) {
     try {
-      keys[row.providerId] = decrypt(row.encryptedKey);
+      keys[row.providerId] = decryptString(row.encryptedKey);
     } catch {
-      // Skip corrupted / invalid key entries
+      // Skip corrupted / invalid key entries.
     }
   }
   return keys;
 }
 
-// Returns list of configured provider IDs for a project (with masked key previews)
 export async function getProjectKeyStatus(projectId) {
   const rows = await db
     .select({
-      providerId:   projectApiKeys.providerId,
+      providerId: projectApiKeys.providerId,
       encryptedKey: projectApiKeys.encryptedKey,
-      updatedAt:    projectApiKeys.updatedAt
+      updatedAt: projectApiKeys.updatedAt,
     })
     .from(projectApiKeys)
     .where(eq(projectApiKeys.projectId, projectId));
 
   return rows.map((row) => {
-    let preview = "";
+    let preview = "********";
     try {
-      const raw = decrypt(row.encryptedKey);
-      preview = raw.length > 8 ? raw.slice(0, 6) + "••••••••" : "••••••••";
+      preview = maskPreview(decryptString(row.encryptedKey));
     } catch {
-      preview = "••••••••";
+      preview = "********";
     }
     return { providerId: row.providerId, preview, updatedAt: row.updatedAt };
   });
@@ -103,4 +107,24 @@ export async function getProjectKeyStatus(projectId) {
 
 export function resolveKey(projectKeys, providerId) {
   return projectKeys[providerId] || "";
+}
+
+export async function setGlobalKey(userId, providerId, apiKey) {
+  return setProjectKey(globalScopeId(userId), providerId, apiKey);
+}
+
+export async function deleteGlobalKey(userId, providerId) {
+  return deleteProjectKey(globalScopeId(userId), providerId);
+}
+
+export async function getGlobalKey(userId, providerId) {
+  return getProjectKey(globalScopeId(userId), providerId);
+}
+
+export async function getGlobalKeys(userId) {
+  return getProjectKeys(globalScopeId(userId));
+}
+
+export async function getGlobalKeyStatus(userId) {
+  return getProjectKeyStatus(globalScopeId(userId));
 }

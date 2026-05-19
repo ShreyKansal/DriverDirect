@@ -39,8 +39,8 @@ const mdComponents = {
   em: ({ children }) => <em className="italic text-body">{children}</em>,
   code: ({ inline, children }) =>
     inline
-      ? <code className="rounded bg-canvasSoft px-1.5 py-0.5 font-mono text-[11px] text-primary">{children}</code>
-      : <pre className="my-2 overflow-x-auto rounded-lg bg-canvasSoft p-3 font-mono text-[11px] leading-relaxed text-ink"><code>{children}</code></pre>,
+      ? <code className="rounded-[2px] bg-surfaceStrong px-1.5 py-0.5 font-mono text-[11px] text-error">{children}</code>
+      : <pre className="my-2 overflow-x-auto rounded-[2px] border border-hairline bg-canvasSoft p-3 font-mono text-[11px] leading-relaxed text-ink"><code>{children}</code></pre>,
   blockquote: ({ children }) => (
     <blockquote className="my-2 border-l-2 border-primary pl-3 text-[12px] text-body">{children}</blockquote>
   ),
@@ -57,28 +57,25 @@ function MessageBubble({ msg }) {
       </span>
 
       <div className={`max-w-[88%] ${isUser ? "" : "w-full"}`}>
-        {/* Attached images */}
         {msg.images?.length > 0 && (
           <div className={`mb-1.5 flex flex-wrap gap-1.5 ${isUser ? "justify-end" : ""}`}>
             {msg.images.map((src, i) => (
               <img key={i} src={src} alt="attachment"
-                className="max-h-32 rounded-xl border border-hairline object-cover shadow-sm" />
+                className="max-h-32 rounded-[2px] border border-hairline object-cover" />
             ))}
           </div>
         )}
 
-        {/* File chips */}
         {msg.files?.length > 0 && (
           <div className={`mb-1.5 flex flex-wrap gap-1 ${isUser ? "justify-end" : ""}`}>
             {msg.files.map((f, i) => (
-              <span key={i} className="rounded-md bg-hairlineStrong/40 px-2 py-0.5 text-[10px] font-medium text-muted">{f}</span>
+              <span key={i} className="rounded-[2px] bg-surfaceStrong px-2 py-0.5 text-[10px] font-medium text-body">{f}</span>
             ))}
           </div>
         )}
 
-        {/* Message content */}
         {isUser ? (
-          <div className="rounded-2xl rounded-br-[4px] bg-surfaceStrong px-3.5 py-2.5">
+          <div className="rounded-[2px] bg-surfaceStrong px-3.5 py-2.5">
             <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-ink">{msg.content}</p>
           </div>
         ) : (
@@ -184,15 +181,15 @@ export default function ChatPanel() {
       onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files); }}
     >
       {/* Message list */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
+      <div className="slim-scroll min-h-0 flex-1 overflow-y-auto px-4 py-5">
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full border border-hairlineStrong bg-panel">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full border border-hairline bg-canvasSoft">
               <MessageSquare size={18} className="text-muted" />
             </div>
             <div>
               <p className="text-[13px] font-semibold text-ink">Chat with your workflow</p>
-              <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
+              <p className="mt-1.5 text-[11px] leading-relaxed text-body">
                 Type a message to trigger a run.<br />Attach text files or images as context.
               </p>
             </div>
@@ -207,14 +204,14 @@ export default function ChatPanel() {
       </div>
 
       {/* Input area */}
-      <div className="shrink-0 px-3 pb-3 pt-1">
+      <div className="shrink-0 border-t border-hairline px-3 pb-3 pt-2">
         {/* Attachment chips */}
         {attachments.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5 px-0.5">
             {attachments.map((att, i) => (
-              <div key={i} className="flex items-center gap-1.5 rounded-lg border border-hairlineStrong bg-panel px-2 py-1 text-[11px] text-body shadow-sm">
+              <div key={i} className="flex items-center gap-1.5 rounded-[2px] border border-hairline bg-surfaceStrong px-2 py-1 text-[11px] text-body">
                 {att.type === "image"
-                  ? <img src={att.dataUrl} alt={att.name} className="h-4 w-4 rounded object-cover" />
+                  ? <img src={att.dataUrl} alt={att.name} className="h-4 w-4 rounded-[2px] object-cover" />
                   : <span className="text-[9px] font-bold uppercase text-muted">.{att.ext}</span>
                 }
                 <span className="max-w-[80px] truncate">{att.name}</span>
@@ -227,12 +224,12 @@ export default function ChatPanel() {
         )}
 
         {/* Input box */}
-        <div className={`rounded-2xl border bg-panel shadow-sm transition-colors ${
-          running ? "border-hairline opacity-60" : "border-hairlineStrong focus-within:border-ink"
+        <div className={`rounded-[2px] border bg-panel transition-colors ${
+          running ? "border-hairline opacity-60" : "border-hairlineStrong focus-within:border-primary"
         }`}>
           <textarea
             ref={textareaRef}
-            className="block w-full resize-none bg-transparent px-4 pb-0 pt-3 text-[12.5px] leading-snug text-ink outline-none placeholder:text-muted"
+            className="block w-full resize-none bg-transparent px-3 pb-0 pt-2.5 text-[12.5px] leading-snug text-ink outline-none placeholder:text-muted"
             placeholder="Ask your workflow something…"
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -240,9 +237,9 @@ export default function ChatPanel() {
             disabled={running}
             rows={1}
           />
-          <div className="flex items-center justify-between px-3 pb-2.5 pt-1.5">
+          <div className="flex items-center justify-between px-2.5 pb-2 pt-1">
             <button
-              className="flex h-7 w-7 items-center justify-center rounded-lg text-muted transition hover:bg-canvasSoft hover:text-ink disabled:opacity-40"
+              className="flex h-7 w-7 items-center justify-center rounded-[2px] text-muted transition hover:bg-canvasSoft hover:text-body disabled:opacity-40"
               onClick={() => fileInputRef.current?.click()}
               disabled={running}
               title="Attach file"
@@ -252,8 +249,8 @@ export default function ChatPanel() {
             <input ref={fileInputRef} type="file" accept={ACCEPTED} multiple className="hidden"
               onChange={(e) => { if (e.target.files?.length) handleFiles(e.target.files); e.target.value = ""; }} />
             <button
-              className={`flex h-7 w-7 items-center justify-center rounded-full transition ${
-                canSend ? "bg-primary text-white hover:bg-primaryActive" : "bg-hairlineStrong text-muted opacity-50"
+              className={`flex h-7 w-7 items-center justify-center rounded-[2px] transition ${
+                canSend ? "bg-primary text-white hover:bg-primary/90" : "bg-canvasSoft text-muted opacity-50"
               }`}
               onClick={handleSend}
               disabled={!canSend}
@@ -263,7 +260,7 @@ export default function ChatPanel() {
             </button>
           </div>
         </div>
-        <p className="mt-1.5 px-1 text-[10px] text-muted/60">↵ Send · ⇧↵ New line</p>
+        <p className="mt-1.5 px-0.5 text-[10px] text-muted">↵ Send · ⇧↵ New line</p>
       </div>
     </div>
   );

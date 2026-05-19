@@ -1,9 +1,25 @@
 import { create } from "zustand";
 import { addEdge, applyEdgeChanges, applyNodeChanges } from "@xyflow/react";
-import { createAgentNode, createToolNode, defaultWorkflow, personResearchWorkflow } from "../utils/graphUtils.js";
+import {
+  createAgentNode,
+  createToolNode,
+  defaultWorkflow,
+  emptyWorkflow,
+  personResearchWorkflow,
+  startupPitchWorkflow,
+  DEFAULT_PLAN_CONSTRAINTS,
+} from "../utils/graphUtils.js";
 import { makeId } from "../utils/idUtils.js";
 import { runWorkflowStreaming } from "../api/workflowApi.js";
 import { fetchProjects, upsertProject, removeProject } from "../api/projectApi.js";
+import {
+  applyExecutionSettingsToWorkflow,
+  applyNodeDefaultsToWorkflow,
+  normalizeProjectRecord,
+  normalizeProjectSettings,
+  projectExecutionDefaults,
+} from "../utils/projectSettings.js";
+import { currentUserKey } from "../utils/authHeaders.js";
 
 // Strip ":latest" from model names so the server resolver can find the right tag
 function fixModelTag(model) {
@@ -16,11 +32,22 @@ function fixWorkflowModels(wf) {
   return { ...wf, nodes: (wf.nodes || []).map((n) => ({ ...n, model: fixModelTag(n.model) })) };
 }
 
+// T1: Migrate old format { workflow: {...} } → new format { workflows: [...], activeWorkflowId }
+// Runs before fixWorkflowModels so we never process undefined.
+function migrateProject(p) {
+  if (!p.workflows) {
+    const wf = fixWorkflowModels(p.workflow) || defaultWorkflow();
+    const { workflow: _dropped, ...rest } = p;
+    return normalizeProjectRecord({ ...rest, workflows: [wf], activeWorkflowId: wf.id });
+  }
+  return normalizeProjectRecord({ ...p, workflows: p.workflows.map(fixWorkflowModels) });
+}
+
 function loadProjectsFromStorage() {
   if (typeof window === "undefined") return [];
   try {
     const projects = JSON.parse(localStorage.getItem("builder-projects") || "[]");
-    return projects.map((p) => ({ ...p, workflow: fixWorkflowModels(p.workflow) }));
+    return projects.map(migrateProject);
   } catch {
     return [];
   }
@@ -32,8 +59,97 @@ function saveProjectsToStorage(projects) {
   }
 }
 
+function makeNextIndexedName(items, prefix) {
+  const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`^${escapedPrefix} \\[(\\d+)\\]$`);
+  const hasBaseName = items.some((item) => item?.name === prefix);
+  const maxIndexedSuffix = items.reduce((highest, item) => {
+    const match = item?.name?.match(pattern);
+    return match ? Math.max(highest, Number(match[1])) : highest;
+  }, 0);
+
+  if (!hasBaseName && maxIndexedSuffix === 0) {
+    return prefix;
+  }
+
+  return `${prefix} [${maxIndexedSuffix + 1}]`;
+}
+
+function makeUntitledProjectName(projects) {
+  return makeNextIndexedName(projects, "Untitled Project");
+}
+
+function makeUntitledWorkflowName(workflows, prefix = "Untitled Workflow") {
+  return makeNextIndexedName(workflows, prefix);
+}
+
+function projectStarterWorkflowName(project) {
+  return project?.settings?.general?.starterWorkflowName?.trim() || "Untitled Workflow";
+}
+
+function applyProjectDefaultsToNewNode(node, project, workflow) {
+  const settings = project?.settings;
+  if (!settings) return node;
+
+  const next = { ...node };
+  const style = settings.general?.nodeNamingStyle || "standard";
+  const agentCount = (workflow?.nodes || []).filter((entry) => entry.type === "agent").length + (node.type === "agent" ? 1 : 0);
+
+  if (style === "compact") {
+    if (node.type === "user_input") next.name = "Input";
+    if (node.type === "orchestrator") next.name = "Orchestrator";
+    if (node.type === "agent") next.name = `Agent ${agentCount}`;
+    if (node.type === "output") next.name = "Output";
+  } else if (style === "role_based") {
+    if (node.type === "user_input") next.name = "User Request";
+    if (node.type === "orchestrator") next.name = "Lead Orchestrator";
+    if (node.type === "agent") next.name = `Specialist ${agentCount}`;
+    if (node.type === "output") next.name = "Deliverable";
+  }
+
+  if (node.type === "agent" || node.type === "orchestrator") {
+    next.provider = settings.models?.defaultProvider || next.provider;
+    next.model = settings.models?.defaultModel || next.model;
+    next.outputFormat = settings.artifacts?.outputFormat || next.outputFormat;
+  }
+
+  if (node.type === "output") {
+    next.outputFormat = settings.artifacts?.outputFormat || next.outputFormat;
+  }
+
+  return next;
+}
+
+function clearActiveProjectStorage() {
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("builder-active-project-id");
+  }
+}
+
+const WORKFLOW_HISTORY_LIMIT = 80;
+
+function pushWorkflowHistory(state) {
+  const current = state.workflow;
+  if (!current) return state.workflowHistoryPast || [];
+  const past = state.workflowHistoryPast || [];
+  if (past[past.length - 1] === current) return past;
+  return [...past.slice(-(WORKFLOW_HISTORY_LIMIT - 1)), current];
+}
+
+function withWorkflowHistory(state, workflow, extra = {}) {
+  return {
+    workflow,
+    workflowHistoryPast: pushWorkflowHistory(state),
+    workflowHistoryFuture: [],
+    ...extra,
+  };
+}
+
 export const useWorkflowStore = create((set, get) => ({
   workflow: fixWorkflowModels(defaultWorkflow()),
+  activeWorkflowId: null, // tracks which workflow within the active project is active
+  workflowHistoryPast: [],
+  workflowHistoryFuture: [],
   selectedNodeId: "orchestrator",
   mermaidText: "",
   savedWorkflows: [],
@@ -44,14 +160,21 @@ export const useWorkflowStore = create((set, get) => ({
   theme: "light",
   activePanel: "explorer",
   terminalOpen: true,
-  showProjectSettings: false,
   workflowTabOpen: true,
   activeWorkspaceTab: "workflow",
   settingsTabOpen: false,
-  settingsModalOpen: false,
+  settingsActiveSection: "general", // last-visited section — restored on reopen
+  settingsProjectId: null,          // which project is being viewed in per-project config
   docsTabOpen: false,
   canvasZoom: 1,
   canvasZoomRequest: null,  // "in" | "out" | "fit" | null
+  canvasMode: "cursor",     // "cursor" | "pan" | "select"
+  canvasSelectedIds: [],    // multi-selected node IDs (kept in sync from FlowCanvas)
+  selectedEdgeId: null,     // edge highlighted on canvas or via ConnectionsPanel
+
+  // Special workspace tabs
+  codeTabOpen: false,
+  agentTabIds: [],          // agent node IDs open as detail tabs
 
   // Current authenticated user — set from NextAuth session in App.jsx
   currentUser: null,
@@ -64,10 +187,22 @@ export const useWorkflowStore = create((set, get) => ({
       const updatedWorkflow = { ...s.workflow, builderTarget: target, updatedAt: new Date().toISOString() };
       const activeProject = s.projects.find((p) => p.id === s.activeProjectId);
       if (activeProject) {
-        const updatedProject = { ...activeProject, workflow: updatedWorkflow, updatedAt: new Date().toISOString() };
+        const nextSettings = normalizeProjectSettings({
+          ...activeProject.settings,
+          execution: { ...(activeProject.settings?.execution || {}), builderTarget: target },
+        }, updatedWorkflow);
+        const updatedWorkflows = (activeProject.workflows || []).map((wf) =>
+          wf.id === s.activeWorkflowId ? updatedWorkflow : wf
+        );
+        const updatedProject = {
+          ...activeProject,
+          workflows: updatedWorkflows,
+          settings: nextSettings,
+          updatedAt: new Date().toISOString(),
+        };
         const projects = s.projects.map((p) => (p.id === s.activeProjectId ? updatedProject : p));
         saveProjectsToStorage(projects);
-        upsertProject(updatedProject, s.currentUser?.email).catch(() => {});
+        upsertProject(updatedProject, currentUserKey(s.currentUser)).catch(() => {});
         return { needsArchitectureSelection: false, workflow: updatedWorkflow, projects };
       }
       return { needsArchitectureSelection: false, workflow: updatedWorkflow };
@@ -86,8 +221,9 @@ export const useWorkflowStore = create((set, get) => ({
   setActiveTerminalProject: (projectId) => set({ activeTerminalProjectId: projectId }),
 
   startRun: async () => {
-    const { workflow, activeProjectId, setStatusMessage } = get();
+    const { workflow, activeProjectId, setStatusMessage, runs, currentUser } = get();
     if (!activeProjectId) return;
+    if (runs[activeProjectId]?.running) return;
 
     const projectId = activeProjectId;
     const promptNode = workflow.nodes.find((n) => n.type === "user_input");
@@ -147,6 +283,8 @@ export const useWorkflowStore = create((set, get) => ({
 
     try {
       await runWorkflowStreaming(runnableWorkflow, userTask, {
+        projectId,
+        userId: currentUserKey(currentUser),
         onEvent(event) {
           if (event.type === "bootstrap_start") {
             patchRun({ bootstrapPhase: { status: "installing", packages: event.packages || [], installedCount: 0, totalCount: (event.packages || []).length, error: null } });
@@ -227,57 +365,82 @@ export const useWorkflowStore = create((set, get) => ({
     let projects;
     let fromApi = false;
     try {
-      projects = await fetchProjects(userId);
+      // Always fetch fresh from server first. Clear stale localStorage before
+      // the call so stale cache can never shadow updated server data.
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("builder-projects");
+      }
+      projects = (await fetchProjects(userId)).map(migrateProject);
       fromApi = true;
     } catch {
       projects = loadProjectsFromStorage(); // fall back to localStorage when server is unreachable
     }
 
     if (fromApi) {
-      if (projects.length === 0) {
-        // Fresh DB — migrate whatever is in localStorage so nothing is lost
-        const localProjects = loadProjectsFromStorage();
-        if (localProjects.length > 0) {
-          projects = localProjects;
-          localProjects.forEach((p) => upsertProject(p, userId).catch(() => {}));
-        }
-      } else {
-        saveProjectsToStorage(projects); // keep localStorage in sync as cache
-      }
+      // When the API is reachable, Postgres is the source of truth. This must
+      // include an empty project list after a deliberate delete-all operation.
+      saveProjectsToStorage(projects);
     }
 
-    // Seed the Person Research demo project once if it isn't saved yet
-    const alreadySeeded = projects.some((p) => p.id === "seed_person_research");
-    if (!alreadySeeded) {
-      const wf = personResearchWorkflow();
-      const seedProject = {
-        id: "seed_person_research",
+    if (!fromApi && projects.length === 0) {
+      projects = [startupPitchWorkflow(), personResearchWorkflow()].map((wf, index) => ({
+        id: index === 0 ? "seed_startup_pitch" : "seed_person_research",
         name: wf.name,
         description: wf.description,
-        workflow: wf,
+        workflows: [wf],
+        activeWorkflowId: wf.id,
         createdAt: wf.createdAt,
-        updatedAt: wf.updatedAt
-      };
-      projects = [seedProject, ...projects];
+        updatedAt: wf.updatedAt,
+      })).map(normalizeProjectRecord);
       saveProjectsToStorage(projects);
-      upsertProject(seedProject, userId).catch(() => {});
-
-      set((state) => ({
-        projects,
-      activeProjectId: "seed_person_research",
-      openTabIds: ["seed_person_research"],
-      workflow: wf,
-      selectedNodeId: wf.nodes[0]?.id || "",
-      focusNodeId: wf.nodes[0]?.id || "",
-      workflowTabOpen: true,
-      activeWorkspaceTab: "workflow",
-      focusVersion: state.focusVersion + 1,
-        statusMessage: "Person Research project loaded."
-      }));
-      return;
     }
 
-    set({ projects });
+    // Restore last active project from localStorage
+    const lastActiveId = typeof window !== "undefined"
+      ? localStorage.getItem("builder-active-project-id")
+      : null;
+    const toActivate = projects.find((p) => p.id === lastActiveId) || projects[0];
+    if (toActivate) {
+      const activeWfId = toActivate.activeWorkflowId || toActivate.workflows?.[0]?.id;
+      const activeWf = toActivate.workflows?.find((w) => w.id === activeWfId) || toActivate.workflows?.[0];
+      set((state) => {
+        // Preserve the current tab if the user is on a special tab (settings, docs, code).
+        // Only default to "workflow" on the very first load (when activeWorkspaceTab is null).
+        const SPECIAL_TABS = ["settings", "docs", "code"];
+        const preserveTab = state.activeWorkspaceTab && SPECIAL_TABS.includes(state.activeWorkspaceTab);
+        return {
+          projects,
+          activeProjectId: toActivate.id,
+          activeWorkflowId: activeWf?.id || null,
+          openTabIds: [toActivate.id],
+          workflow: activeWf || defaultWorkflow(),
+          selectedNodeId: activeWf?.nodes?.[0]?.id || "",
+          focusNodeId:    activeWf?.nodes?.[0]?.id || "",
+          workflowHistoryPast: [],
+          workflowHistoryFuture: [],
+          workflowTabOpen: true,
+          activeWorkspaceTab: preserveTab ? state.activeWorkspaceTab : "workflow",
+          focusVersion: state.focusVersion + 1,
+        };
+      });
+    } else {
+      clearActiveProjectStorage();
+      set((state) => ({
+        projects: [],
+        activeProjectId: null,
+        activeWorkflowId: null,
+        openTabIds: [],
+        workflow: emptyWorkflow(),
+        selectedNodeId: "",
+        focusNodeId: "",
+        workflowHistoryPast: [],
+        workflowHistoryFuture: [],
+        workflowTabOpen: false,
+        activeWorkspaceTab: state.settingsTabOpen ? "settings" : null,
+        agentTabIds: [],
+        focusVersion: state.focusVersion + 1,
+      }));
+    }
   },
 
   setStatusMessage: (statusMessage) => set({ statusMessage }),
@@ -288,36 +451,76 @@ export const useWorkflowStore = create((set, get) => ({
     set((state) => ({ activePanel: state.activePanel === panel ? null : panel })),
   setTerminalOpen: (terminalOpen) => set({ terminalOpen }),
   toggleTerminalOpen: () => set((state) => ({ terminalOpen: !state.terminalOpen })),
-  setShowProjectSettings: (showProjectSettings) => set({ showProjectSettings }),
   setCanvasZoom: (canvasZoom) => set({ canvasZoom }),
   requestCanvasZoom: (type) => set({ canvasZoomRequest: type }),
   clearCanvasZoomRequest: () => set({ canvasZoomRequest: null }),
-  toggleProjectSettings: () =>
+  setCanvasMode: (canvasMode) => set({ canvasMode }),
+  setCanvasSelectedIds: (ids) => set({ canvasSelectedIds: ids }),
+  selectEdge:       (edgeId) => set({ selectedEdgeId: edgeId }),
+  clearSelectedEdge: ()      => set({ selectedEdgeId: null }),
+  recordWorkflowHistory: () =>
     set((state) => ({
-      showProjectSettings: !state.showProjectSettings,
-      settingsTabOpen: !state.showProjectSettings ? true : state.settingsTabOpen,
-      activeWorkspaceTab: !state.showProjectSettings ? "settings" : state.workflowTabOpen ? "workflow" : null,
-      selectedNodeId: !state.showProjectSettings ? "" : state.selectedNodeId
+      workflowHistoryPast: pushWorkflowHistory(state),
+      workflowHistoryFuture: [],
     })),
-  openProjectSettings: () =>
-    set({ settingsTabOpen: true, settingsModalOpen: false, activeWorkspaceTab: "settings", selectedNodeId: "" }),
-  closeSettingsModal: () =>
+  undoWorkflow: () =>
+    set((state) => {
+      const past = state.workflowHistoryPast || [];
+      const previous = past[past.length - 1];
+      if (!previous) return { statusMessage: "Nothing to undo." };
+      const previousNodeIds = new Set((previous.nodes || []).map((node) => node.id));
+      const previousEdgeIds = new Set((previous.edges || []).map((edge) => edge.id));
+      return {
+        workflow: previous,
+        workflowHistoryPast: past.slice(0, -1),
+        workflowHistoryFuture: [state.workflow, ...(state.workflowHistoryFuture || [])].slice(0, WORKFLOW_HISTORY_LIMIT),
+        selectedNodeId: previousNodeIds.has(state.selectedNodeId) ? state.selectedNodeId : previous.nodes?.[0]?.id || "",
+        focusNodeId: previousNodeIds.has(state.focusNodeId) ? state.focusNodeId : previous.nodes?.[0]?.id || "",
+        selectedEdgeId: previousEdgeIds.has(state.selectedEdgeId) ? state.selectedEdgeId : null,
+        canvasSelectedIds: (state.canvasSelectedIds || []).filter((id) => previousNodeIds.has(id)),
+        statusMessage: "Undid last canvas change.",
+      };
+    }),
+
+  openCodeTab: () => set({ codeTabOpen: true, activeWorkspaceTab: "code" }),
+  closeCodeTab: () =>
+    set((s) => ({ codeTabOpen: false, activeWorkspaceTab: s.workflowTabOpen ? "workflow" : null })),
+
+  openAgentTab: (agentId) =>
+    set((s) => ({
+      agentTabIds: s.agentTabIds.includes(agentId) ? s.agentTabIds : [...s.agentTabIds, agentId],
+      activeWorkspaceTab: `agent:${agentId}`,
+    })),
+  closeAgentTab: (agentId) =>
+    set((s) => {
+      const remaining = s.agentTabIds.filter((id) => id !== agentId);
+      const wasActive = s.activeWorkspaceTab === `agent:${agentId}`;
+      return {
+        agentTabIds: remaining,
+        activeWorkspaceTab: wasActive
+          ? (s.workflowTabOpen ? "workflow" : remaining.length ? `agent:${remaining[remaining.length - 1]}` : null)
+          : s.activeWorkspaceTab,
+      };
+    }),
+  openSettings: () =>
+    set({ settingsTabOpen: true, activeWorkspaceTab: "settings", selectedNodeId: "" }),
+  closeSettings: () =>
     set((s) => ({
       settingsTabOpen: false,
-      settingsModalOpen: false,
-      activeWorkspaceTab: s.workflowTabOpen ? "workflow" : null
+      activeWorkspaceTab: s.workflowTabOpen ? "workflow" : null,
     })),
+  setSettingsProject: (id) => set({ settingsProjectId: id }),
+  setSettingsActiveSection: (section) => set({ settingsActiveSection: section }),
   openDocsTab: () => set({ docsTabOpen: true, activeWorkspaceTab: "docs" }),
   closeDocsTab: () =>
     set((s) => ({ docsTabOpen: false, activeWorkspaceTab: s.workflowTabOpen ? "workflow" : null })),
-  openWorkflowTab: () => set({ workflowTabOpen: true, activeWorkspaceTab: "workflow", showProjectSettings: false, settingsModalOpen: false }),
+  openWorkflowTab: () => set({ workflowTabOpen: true, activeWorkspaceTab: "workflow" }),
   closeWorkflowTab: () =>
     set((state) => ({
       workflowTabOpen: false,
       activeWorkspaceTab: state.activeWorkspaceTab === "workflow"
         ? state.settingsTabOpen ? "settings" : null
         : state.activeWorkspaceTab,
-      showProjectSettings: state.activeWorkspaceTab === "workflow" ? state.settingsTabOpen : state.showProjectSettings
     })),
   closeSettingsTab: () =>
     set((state) => ({
@@ -325,54 +528,76 @@ export const useWorkflowStore = create((set, get) => ({
       activeWorkspaceTab: state.activeWorkspaceTab === "settings"
         ? state.workflowTabOpen ? "workflow" : null
         : state.activeWorkspaceTab,
-      showProjectSettings: false
     })),
   selectNode: (id) =>
-    set({
-      selectedNodeId: id,
-      showProjectSettings: id ? false : get().showProjectSettings,
-      workflowTabOpen: id ? true : get().workflowTabOpen,
-      activeWorkspaceTab: id ? "workflow" : get().activeWorkspaceTab
+    set((s) => {
+      // Never yank the user away from settings/docs/code just because a node was selected.
+      const STICKY_TABS = ["settings", "docs", "code"];
+      const onStickyTab = s.activeWorkspaceTab && STICKY_TABS.includes(s.activeWorkspaceTab);
+      return {
+        selectedNodeId: id,
+        workflowTabOpen: id ? true : s.workflowTabOpen,
+        activeWorkspaceTab: (!id || onStickyTab)
+          ? s.activeWorkspaceTab
+          : s.activeWorkspaceTab?.startsWith("agent:") ? s.activeWorkspaceTab : "workflow",
+      };
     }),
   updateWorkflow: (updates) =>
-    set((state) => ({
-      workflow: {
-        ...state.workflow,
-        ...updates,
-        updatedAt: new Date().toISOString()
+    set((state) => {
+      const newWorkflow = { ...state.workflow, ...updates, updatedAt: new Date().toISOString() };
+      const { activeProjectId, activeWorkflowId, projects } = state;
+      if (activeProjectId && (updates.name !== undefined || updates.description !== undefined)) {
+        const newProjects = projects.map((p) => {
+          if (p.id !== activeProjectId) return p;
+          const updatedWorkflows = (p.workflows || []).map((wf) =>
+            wf.id === activeWorkflowId ? newWorkflow : wf
+          );
+          return { ...p, workflows: updatedWorkflows, updatedAt: newWorkflow.updatedAt };
+        });
+        saveProjectsToStorage(newProjects);
+        return { workflow: newWorkflow, projects: newProjects };
       }
-    })),
+      return { workflow: newWorkflow };
+    }),
   focusNode: (id = get().selectedNodeId) =>
-    set((state) => ({
-      selectedNodeId: id,
-      focusNodeId: id,
-      focusVersion: state.focusVersion + 1,
-      showProjectSettings: id ? false : state.showProjectSettings,
-      workflowTabOpen: id ? true : state.workflowTabOpen,
-      activeWorkspaceTab: id ? "workflow" : state.activeWorkspaceTab
-    })),
+    set((state) => {
+      // Never yank the user away from settings/docs/code when a node receives focus.
+      const STICKY_TABS = ["settings", "docs", "code"];
+      const onStickyTab = state.activeWorkspaceTab && STICKY_TABS.includes(state.activeWorkspaceTab);
+      return {
+        selectedNodeId: id,
+        focusNodeId: id,
+        focusVersion: state.focusVersion + 1,
+        workflowTabOpen: id ? true : state.workflowTabOpen,
+        activeWorkspaceTab: (id && !onStickyTab) ? "workflow" : state.activeWorkspaceTab,
+      };
+    }),
 
   // Project management
   createProjectFromWorkflow: (workflow) => {
     const wf = { ...workflow, id: makeId("wf") };
-    const project = {
+    const project = normalizeProjectRecord({
       id: makeId("proj"),
       name: wf.name || "Imported Project",
       description: wf.description || "",
-      workflow: wf,
+      workflows: [wf],
+      activeWorkflowId: wf.id,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
-    };
+    });
     const projects = [...get().projects, project];
     saveProjectsToStorage(projects);
-    upsertProject(project, get().currentUser?.email).catch(() => {});
+    upsertProject(project, currentUserKey(get().currentUser)).catch(() => {});
     set((state) => ({
       projects,
       activeProjectId: project.id,
+      activeWorkflowId: wf.id,
       openTabIds: state.openTabIds.includes(project.id) ? state.openTabIds : [...state.openTabIds, project.id],
       workflow: wf,
       selectedNodeId: wf.nodes[0]?.id || "",
       focusNodeId: wf.nodes[0]?.id || "",
+      workflowHistoryPast: [],
+      workflowHistoryFuture: [],
       workflowTabOpen: true,
       activeWorkspaceTab: "workflow",
       focusVersion: state.focusVersion + 1,
@@ -381,43 +606,60 @@ export const useWorkflowStore = create((set, get) => ({
   },
 
   createProject: (name = "New Project") => {
-    const wf = { ...defaultWorkflow(), name, id: makeId("wf"), builderTarget: "" };
-    const project = {
+    const existingProjects = get().projects;
+    const projectName = !name || name === "New Project"
+      ? makeUntitledProjectName(existingProjects)
+      : name;
+    const workflowName = makeUntitledWorkflowName([]);
+    const wf = { ...emptyWorkflow(), name: workflowName, id: makeId("wf"), builderTarget: "langgraph" };
+    const project = normalizeProjectRecord({
       id: makeId("proj"),
-      name,
+      name: projectName,
       description: "",
-      workflow: wf,
+      workflows: [wf],
+      activeWorkflowId: wf.id,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
-    };
-    const projects = [...get().projects, project];
+    });
+    const projects = [...existingProjects, project];
     saveProjectsToStorage(projects);
-    upsertProject(project, get().currentUser?.email).catch(() => {});
+    upsertProject(project, currentUserKey(get().currentUser)).catch(() => {});
+    if (typeof window !== "undefined") localStorage.setItem("builder-active-project-id", project.id);
     set((state) => ({
       projects,
       activeProjectId: project.id,
+      activeWorkflowId: wf.id,
       openTabIds: state.openTabIds.includes(project.id) ? state.openTabIds : [...state.openTabIds, project.id],
       workflow: wf,
       selectedNodeId: wf.nodes[0]?.id || "",
       focusNodeId: wf.nodes[0]?.id || "",
+      workflowHistoryPast: [],
+      workflowHistoryFuture: [],
       workflowTabOpen: true,
       activeWorkspaceTab: "workflow",
       focusVersion: state.focusVersion + 1,
       needsArchitectureSelection: true,
-      statusMessage: `Project "${name}" created.`
+      statusMessage: `Project "${projectName}" created.`
     }));
   },
 
   switchProject: (id) => {
     const project = get().projects.find((p) => p.id === id);
     if (!project) return;
+    const activeWfId = project.activeWorkflowId || project.workflows?.[0]?.id;
+    const activeWf = project.workflows?.find((w) => w.id === activeWfId) || project.workflows?.[0];
+    if (typeof window !== "undefined") localStorage.setItem("builder-active-project-id", id);
     set((state) => ({
       activeProjectId: id,
-      workflow: project.workflow,
-      selectedNodeId: project.workflow.nodes[0]?.id || "",
-      focusNodeId: project.workflow.nodes[0]?.id || "",
+      activeWorkflowId: activeWf?.id || null,
+      workflow: activeWf || defaultWorkflow(),
+      selectedNodeId: activeWf?.nodes?.[0]?.id || "",
+      focusNodeId: activeWf?.nodes?.[0]?.id || "",
+      workflowHistoryPast: [],
+      workflowHistoryFuture: [],
       workflowTabOpen: true,
       activeWorkspaceTab: "workflow",
+      agentTabIds: [],
       focusVersion: state.focusVersion + 1,
       statusMessage: `Switched to "${project.name}".`,
       openTabIds: state.openTabIds.includes(id) ? state.openTabIds : [...state.openTabIds, id],
@@ -445,45 +687,141 @@ export const useWorkflowStore = create((set, get) => ({
   deleteProject: (id) => {
     const projects = get().projects.filter((p) => p.id !== id);
     saveProjectsToStorage(projects);
-    removeProject(id, get().currentUser?.email).catch(() => {});
+    removeProject(id, currentUserKey(get().currentUser)).catch(() => {});
     const isActive = get().activeProjectId === id;
-    set((state) => ({
-      projects,
-      activeProjectId: isActive ? null : state.activeProjectId,
-      ...(isActive
-        ? { workflow: defaultWorkflow(), selectedNodeId: "orchestrator", focusNodeId: "orchestrator", workflowTabOpen: true, activeWorkspaceTab: "workflow", focusVersion: state.focusVersion + 1 }
-        : {})
-    }));
+
+    if (isActive && projects.length > 0) {
+      // Auto-switch to first remaining project
+      const next = projects[0];
+      const activeWfId = next.activeWorkflowId || next.workflows?.[0]?.id;
+      const activeWf = next.workflows?.find((w) => w.id === activeWfId) || next.workflows?.[0];
+      if (typeof window !== "undefined") localStorage.setItem("builder-active-project-id", next.id);
+      set((state) => ({
+        projects,
+        activeProjectId: next.id,
+        activeWorkflowId: activeWf?.id || null,
+        openTabIds: [...state.openTabIds.filter((tid) => tid !== id), next.id].filter((v, i, a) => a.indexOf(v) === i),
+        workflow: activeWf || defaultWorkflow(),
+        selectedNodeId: activeWf?.nodes?.[0]?.id || "",
+        focusNodeId: activeWf?.nodes?.[0]?.id || "",
+        workflowHistoryPast: [],
+        workflowHistoryFuture: [],
+        workflowTabOpen: true,
+        activeWorkspaceTab: "workflow",
+        agentTabIds: [],
+        settingsProjectId: state.settingsProjectId === id ? null : state.settingsProjectId,
+        focusVersion: state.focusVersion + 1,
+        statusMessage: `Switched to "${next.name}".`,
+      }));
+    } else {
+      set((state) => ({
+        projects,
+        activeProjectId: isActive ? null : state.activeProjectId,
+        openTabIds: state.openTabIds.filter((tid) => tid !== id),
+        settingsProjectId: state.settingsProjectId === id ? null : state.settingsProjectId,
+        ...(isActive
+          ? { activeWorkflowId: null, workflow: defaultWorkflow(), selectedNodeId: "", focusNodeId: "", workflowTabOpen: false, activeWorkspaceTab: null, focusVersion: state.focusVersion + 1 }
+          : {})
+      }));
+    }
   },
 
   renameProject: (id, name) => {
     const projects = get().projects.map((p) => (p.id === id ? { ...p, name } : p));
     saveProjectsToStorage(projects);
     const updated = projects.find((p) => p.id === id);
-    if (updated) upsertProject(updated, get().currentUser?.email).catch(() => {});
+    if (updated) upsertProject(updated, currentUserKey(get().currentUser)).catch(() => {});
     set({ projects });
   },
 
+  updateProjectMeta: (id, updates) => {
+    const projects = get().projects.map((p) => (
+      p.id === id
+        ? { ...p, ...updates, updatedAt: new Date().toISOString() }
+        : p
+    ));
+    saveProjectsToStorage(projects);
+    const updated = projects.find((p) => p.id === id);
+    if (updated) upsertProject(updated, currentUserKey(get().currentUser)).catch(() => {});
+    set({ projects, ...(id === get().activeProjectId ? { statusMessage: "Project settings updated." } : {}) });
+  },
+
+  updateProjectSettings: (id, updates) => {
+    const { activeProjectId, activeWorkflowId, workflowHistoryPast, workflowHistoryFuture } = get();
+    let nextActiveWorkflow = null;
+    const projects = get().projects.map((p) => {
+      if (p.id !== id) return p;
+      const settings = normalizeProjectSettings({
+        ...p.settings,
+        ...updates,
+        general: { ...(p.settings?.general || {}), ...(updates.general || {}) },
+        models: { ...(p.settings?.models || {}), ...(updates.models || {}) },
+        execution: { ...(p.settings?.execution || {}), ...(updates.execution || {}) },
+        artifacts: { ...(p.settings?.artifacts || {}), ...(updates.artifacts || {}) },
+        collaboration: { ...(p.settings?.collaboration || {}), ...(updates.collaboration || {}) },
+        appearance: { ...(p.settings?.appearance || {}), ...(updates.appearance || {}) },
+      }, p.workflows?.[0]);
+      let workflows = p.workflows || [];
+
+      if (updates.execution) {
+        workflows = workflows.map((entry) => applyExecutionSettingsToWorkflow(entry, settings.execution));
+      }
+      if (updates.models || updates.artifacts) {
+        workflows = workflows.map((entry) => applyNodeDefaultsToWorkflow(entry, settings));
+      }
+
+      if (id === activeProjectId) {
+        nextActiveWorkflow = workflows.find((entry) => entry.id === activeWorkflowId) || p.workflows?.[0] || null;
+      }
+
+      return {
+        ...p,
+        settings,
+        workflows,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+    saveProjectsToStorage(projects);
+    const updated = projects.find((p) => p.id === id);
+    if (updated) upsertProject(updated, currentUserKey(get().currentUser)).catch(() => {});
+    set({
+      projects,
+      ...(id === activeProjectId && nextActiveWorkflow
+        ? {
+            workflow: nextActiveWorkflow,
+            workflowHistoryPast,
+            workflowHistoryFuture,
+          }
+        : {}),
+      ...(id === activeProjectId ? { statusMessage: "Project settings updated." } : {}),
+    });
+  },
+
   saveCurrentToProject: () => {
-    const { workflow, activeProjectId, projects } = get();
+    const { workflow, activeProjectId, activeWorkflowId, projects } = get();
     if (!activeProjectId) {
-      const project = {
+      const project = normalizeProjectRecord({
         id: makeId("proj"),
         name: workflow.name,
         description: workflow.description || "",
-        workflow: { ...workflow },
+        workflows: [{ ...workflow }],
+        activeWorkflowId: workflow.id,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
-      };
+      });
       const newProjects = [...projects, project];
       saveProjectsToStorage(newProjects);
-      upsertProject(project, get().currentUser?.email).catch(() => {});
-      set({ projects: newProjects, activeProjectId: project.id, statusMessage: "Saved as new project." });
+      upsertProject(project, currentUserKey(get().currentUser)).catch(() => {});
+      set((state) => ({ projects: newProjects, activeProjectId: project.id, activeWorkflowId: workflow.id, openTabIds: state.openTabIds.includes(project.id) ? state.openTabIds : [...state.openTabIds, project.id], statusMessage: "Saved as new project." }));
     } else {
-      const updated = { ...projects.find((p) => p.id === activeProjectId), workflow: { ...workflow }, updatedAt: new Date().toISOString() };
+      const existing = projects.find((p) => p.id === activeProjectId);
+      const updatedWorkflows = (existing.workflows || []).map((wf) =>
+        wf.id === activeWorkflowId ? { ...workflow } : wf
+      );
+      const updated = { ...existing, workflows: updatedWorkflows, updatedAt: new Date().toISOString() };
       const newProjects = projects.map((p) => (p.id === activeProjectId ? updated : p));
       saveProjectsToStorage(newProjects);
-      upsertProject(updated, get().currentUser?.email).catch(() => {});
+      upsertProject(updated, currentUserKey(get().currentUser)).catch(() => {});
       set((state) => ({
         projects: newProjects,
         statusMessage: state.statusMessage === "Project saved." ? "" : state.statusMessage
@@ -493,6 +831,7 @@ export const useWorkflowStore = create((set, get) => ({
 
   addAgent: (type = "agent") => {
     const workflow = get().workflow;
+    const project = get().projects.find((entry) => entry.id === get().activeProjectId);
     if (type === "orchestrator" && workflow.nodes.some((node) => node.type === "orchestrator")) {
       const orchestrator = workflow.nodes.find((node) => node.type === "orchestrator");
       set((state) => ({
@@ -518,17 +857,20 @@ export const useWorkflowStore = create((set, get) => ({
       return;
     }
     const selectedNode = workflow.nodes.find((node) => node.id === get().selectedNodeId);
-    const node = createAgentNode(type, workflow.nodes.length + 1, selectedNode);
+    const node = applyProjectDefaultsToNewNode(
+      createAgentNode(type, workflow.nodes.length + 1, selectedNode),
+      project,
+      workflow
+    );
     const shouldConnect = selectedNode && selectedNode.id !== node.id;
     const edge = shouldConnect ? { id: makeId("edge"), source: selectedNode.id, target: node.id } : null;
 
-    set((state) => ({
-      workflow: {
+    set((state) => withWorkflowHistory(state, {
         ...workflow,
         nodes: [...workflow.nodes, node],
         edges: edge ? [...workflow.edges, edge] : workflow.edges,
         updatedAt: new Date().toISOString()
-      },
+      }, {
       selectedNodeId: node.id,
       focusNodeId: node.id,
       workflowTabOpen: true,
@@ -543,13 +885,12 @@ export const useWorkflowStore = create((set, get) => ({
     const parent   = workflow.nodes.find((n) => n.id === parentAgentId);
     const toolNode = createToolNode(parent);
     const edge     = { id: makeId("te"), source: parentAgentId, target: toolNode.id, type: "tool" };
-    set((state) => ({
-      workflow: {
+    set((state) => withWorkflowHistory(state, {
         ...workflow,
         nodes: [...workflow.nodes, toolNode],
         edges: [...workflow.edges, edge],
         updatedAt: new Date().toISOString()
-      },
+      }, {
       selectedNodeId:     toolNode.id,
       focusNodeId:        toolNode.id,
       workflowTabOpen:    true,
@@ -608,43 +949,40 @@ export const useWorkflowStore = create((set, get) => ({
 
     const orderedIds = new Set(positioned.map((n) => n.id));
     const remaining  = workflow.nodes.filter((n) => !orderedIds.has(n.id));
-    set((state) => ({
-      workflow: {
+    set((state) => withWorkflowHistory(state, {
         ...workflow,
         nodes: [...positioned, ...remaining],
         updatedAt: new Date().toISOString()
-      },
+      }, {
       focusNodeId: get().selectedNodeId || orchestrator?.id || positioned[0]?.id || "",
       focusVersion: state.focusVersion + 1,
       statusMessage: "Graph layout refreshed."
     }));
   },
 
-  connectNodes: (sourceId, targetId) => {
+  connectNodes: (sourceId, targetId, sourcePort = "right", targetPort = "left") => {
     const workflow = get().workflow;
     if (!sourceId || !targetId || sourceId === targetId) return;
     if (workflow.edges.some((edge) => edge.source === sourceId && edge.target === targetId)) {
       set({ statusMessage: "That graph link already exists." });
       return;
     }
-    set({
-      workflow: {
-        ...workflow,
-        edges: [...workflow.edges, { id: makeId("edge"), source: sourceId, target: targetId }],
+    set((state) => withWorkflowHistory(state, {
+        ...state.workflow,
+        edges: [...state.workflow.edges, { id: makeId("edge"), source: sourceId, target: targetId, sourcePort, targetPort }],
         updatedAt: new Date().toISOString()
-      },
+      }, {
       statusMessage: "Graph link added."
-    });
+    }));
   },
   connectSelectedTo: (targetId) => get().connectNodes(get().selectedNodeId, targetId),
 
   removeEdge: (edgeId) =>
-    set((state) => ({
-      workflow: {
+    set((state) => withWorkflowHistory(state, {
         ...state.workflow,
         edges: state.workflow.edges.filter((edge) => edge.id !== edgeId),
         updatedAt: new Date().toISOString()
-      },
+      }, {
       statusMessage: "Graph link removed."
     })),
 
@@ -661,23 +999,27 @@ export const useWorkflowStore = create((set, get) => ({
       };
     }),
 
-  updateNode: (id, updates) =>
-    set((state) => ({
-      workflow: {
+  updateNode: (id, updates, options = {}) =>
+    set((state) => {
+      const workflow = {
         ...state.workflow,
         nodes: state.workflow.nodes.map((node) => (node.id === id ? { ...node, ...updates } : node)),
         updatedAt: new Date().toISOString()
-      }
-    })),
+      };
+      if (options.skipHistory) return { workflow };
+      return withWorkflowHistory(state, workflow);
+    }),
 
   deleteNode: (id = get().selectedNodeId) =>
-    set((state) => ({
-      workflow: {
+    set((state) => withWorkflowHistory(state, {
         ...state.workflow,
         nodes: state.workflow.nodes.filter((node) => node.id !== id),
         edges: state.workflow.edges.filter((edge) => edge.source !== id && edge.target !== id),
+        groups: (state.workflow.groups || [])
+          .map((g) => ({ ...g, nodeIds: g.nodeIds.filter((nid) => nid !== id) }))
+          .filter((g) => g.nodeIds.length > 0),
         updatedAt: new Date().toISOString()
-      },
+      }, {
       selectedNodeId: state.selectedNodeId === id ? "" : state.selectedNodeId
     })),
 
@@ -693,8 +1035,9 @@ export const useWorkflowStore = create((set, get) => ({
       position: { x: (node.position?.x || 0) + 280, y: (node.position?.y || 0) + 48 }
     };
     const edge = { id: makeId("edge"), source: node.id, target: copy.id };
-    set((state) => ({
-      workflow: { ...workflow, nodes: [...workflow.nodes, copy], edges: [...workflow.edges, edge], updatedAt: new Date().toISOString() },
+    set((state) => withWorkflowHistory(state,
+      { ...workflow, nodes: [...workflow.nodes, copy], edges: [...workflow.edges, edge], updatedAt: new Date().toISOString() },
+      {
       selectedNodeId: copy.id,
       focusNodeId: copy.id,
       workflowTabOpen: true,
@@ -705,8 +1048,7 @@ export const useWorkflowStore = create((set, get) => ({
   },
 
   resetWorkflow: () =>
-    set((state) => ({
-      workflow: defaultWorkflow(),
+    set((state) => withWorkflowHistory(state, defaultWorkflow(), {
       selectedNodeId: "orchestrator",
       focusNodeId: "orchestrator",
       workflowTabOpen: true,
@@ -725,33 +1067,28 @@ export const useWorkflowStore = create((set, get) => ({
       }));
       const changed = applyNodeChanges(changes, flowNodes);
       const positions = new Map(changed.map((node) => [node.id, node.position]));
-      return {
-        workflow: {
+      return withWorkflowHistory(state, {
           ...state.workflow,
           nodes: state.workflow.nodes.map((node) => ({ ...node, position: positions.get(node.id) || node.position })),
           updatedAt: new Date().toISOString()
-        }
-      };
+        });
     }),
 
   onEdgesChange: (changes) =>
     set((state) => {
       const changed = applyEdgeChanges(changes, state.workflow.edges);
-      return { workflow: { ...state.workflow, edges: changed, updatedAt: new Date().toISOString() } };
+      return withWorkflowHistory(state, { ...state.workflow, edges: changed, updatedAt: new Date().toISOString() });
     }),
 
   onConnect: (connection) =>
-    set((state) => ({
-      workflow: {
+    set((state) => withWorkflowHistory(state, {
         ...state.workflow,
         edges: addEdge({ ...connection, id: makeId("edge") }, state.workflow.edges),
         updatedAt: new Date().toISOString()
-      }
-    })),
+      })),
 
   setWorkflow: (workflow) =>
-    set((state) => ({
-      workflow,
+    set((state) => withWorkflowHistory(state, workflow, {
       selectedNodeId: workflow.nodes[0]?.id || "",
       focusNodeId: workflow.nodes[0]?.id || "",
       workflowTabOpen: true,
@@ -759,5 +1096,347 @@ export const useWorkflowStore = create((set, get) => ({
       focusVersion: state.focusVersion + 1,
       mermaidText: workflow.mermaid || ""
     })),
-  setMermaidText: (mermaidText) => set({ mermaidText })
+  setMermaidText: (mermaidText) => set({ mermaidText }),
+
+  // ── Workspace import (Feature 3) ──────────────────────────────────────────
+  importWorkspaceToProject: (sourceProjectId) => {
+    const { projects, activeProjectId, workflow } = get();
+    const source = projects.find((p) => p.id === sourceProjectId);
+    if (!source || sourceProjectId === activeProjectId || !activeProjectId) return;
+    if ((workflow.importedWorkspaces || []).some((iw) => iw.sourceProjectId === sourceProjectId)) {
+      set({ statusMessage: "This workspace is already imported." });
+      return;
+    }
+    const entry = {
+      id: makeId("imp"),
+      sourceProjectId,
+      sourceName: source.name,
+      nodes: source.workflow.nodes.filter((n) => n.type !== "tool"),
+      edges: source.workflow.edges.filter((e) => e.type !== "tool"),
+    };
+    const updatedWorkflow = {
+      ...workflow,
+      importedWorkspaces: [...(workflow.importedWorkspaces || []), entry],
+      updatedAt: new Date().toISOString(),
+    };
+    const activeProject = projects.find((p) => p.id === activeProjectId);
+    const updatedProject = { ...activeProject, workflow: updatedWorkflow, updatedAt: new Date().toISOString() };
+    const updatedProjects = projects.map((p) => p.id === activeProjectId ? updatedProject : p);
+    saveProjectsToStorage(updatedProjects);
+    upsertProject(updatedProject, currentUserKey(get().currentUser)).catch(() => {});
+    set((state) => withWorkflowHistory(state, updatedWorkflow, {
+      projects: updatedProjects,
+      statusMessage: `"${source.name}" added to imported workspaces.`,
+    }));
+  },
+
+  removeImportedWorkspace: (importedId) => {
+    const { workflow, projects, activeProjectId } = get();
+    const updatedWorkflow = {
+      ...workflow,
+      importedWorkspaces: (workflow.importedWorkspaces || []).filter((iw) => iw.id !== importedId),
+      updatedAt: new Date().toISOString(),
+    };
+    const activeProject = projects.find((p) => p.id === activeProjectId);
+    const updatedProject = { ...activeProject, workflow: updatedWorkflow, updatedAt: new Date().toISOString() };
+    const updatedProjects = projects.map((p) => p.id === activeProjectId ? updatedProject : p);
+    saveProjectsToStorage(updatedProjects);
+    upsertProject(updatedProject, currentUserKey(get().currentUser)).catch(() => {});
+    set((state) => withWorkflowHistory(state, updatedWorkflow, { projects: updatedProjects }));
+  },
+
+  // Import selected nodes from an imported workspace into the active canvas (Feature 4 + 6)
+  importNodesToWorkflow: (importedId, selectedNodeIds) => {
+    const { workflow } = get();
+    const imported = (workflow.importedWorkspaces || []).find((iw) => iw.id === importedId);
+    if (!imported || !selectedNodeIds.length) return;
+    const existingMaxX = workflow.nodes.reduce((mx, n) => Math.max(mx, (n.position?.x || 0) + 240), 100);
+    const idMap = {};
+    const newNodes = imported.nodes
+      .filter((n) => selectedNodeIds.includes(n.id))
+      .map((n) => {
+        const nid = makeId("node");
+        idMap[n.id] = nid;
+        return { ...n, id: nid, position: { x: existingMaxX + (n.position?.x || 0) + 60, y: n.position?.y || 100 } };
+      });
+    const newEdges = imported.edges
+      .filter((e) => selectedNodeIds.includes(e.source) && selectedNodeIds.includes(e.target))
+      .map((e) => ({ ...e, id: makeId("edge"), source: idMap[e.source], target: idMap[e.target] }));
+    const group = {
+      id: makeId("grp"),
+      name: `From: ${imported.sourceName}`,
+      color: "#3b82f6",
+      nodeIds: newNodes.map((n) => n.id),
+    };
+    set((state) => withWorkflowHistory(state, {
+        ...state.workflow,
+        nodes: [...state.workflow.nodes, ...newNodes],
+        edges: [...state.workflow.edges, ...newEdges],
+        groups: [...(state.workflow.groups || []), group],
+        updatedAt: new Date().toISOString(),
+      }, {
+      statusMessage: `${newNodes.length} node(s) imported from "${imported.sourceName}".`,
+    }));
+  },
+
+  // Import nodes directly from a source project (bypasses importedWorkspaces)
+  importNodesDirectly: (sourceProjectId, selectedNodeIds) => {
+    const { projects, workflow } = get();
+    const source = projects.find((p) => p.id === sourceProjectId);
+    if (!source || !selectedNodeIds.length) return;
+    const existingMaxX = workflow.nodes.reduce((mx, n) => Math.max(mx, (n.position?.x || 0) + 240), 100);
+    const idMap = {};
+    const newNodes = source.workflow.nodes
+      .filter((n) => n.type !== "tool" && selectedNodeIds.includes(n.id))
+      .map((n) => {
+        const nid = makeId("node");
+        idMap[n.id] = nid;
+        return { ...n, id: nid, position: { x: existingMaxX + (n.position?.x || 0) + 60, y: n.position?.y || 100 } };
+      });
+    const newEdges = source.workflow.edges
+      .filter((e) => selectedNodeIds.includes(e.source) && selectedNodeIds.includes(e.target))
+      .map((e) => ({ ...e, id: makeId("edge"), source: idMap[e.source], target: idMap[e.target] }));
+    const group = {
+      id: makeId("grp"),
+      name: `From: ${source.name}`,
+      color: "#3b82f6",
+      nodeIds: newNodes.map((n) => n.id),
+    };
+    set((state) => withWorkflowHistory(state, {
+        ...state.workflow,
+        nodes: [...state.workflow.nodes, ...newNodes],
+        edges: [...state.workflow.edges, ...newEdges],
+        groups: [...(state.workflow.groups || []), group],
+        updatedAt: new Date().toISOString(),
+      }, {
+      statusMessage: `${newNodes.length} node(s) imported from "${source.name}".`,
+    }));
+  },
+
+  // ── Node groups (Feature 5) ───────────────────────────────────────────────
+  createGroup: (nodeIds, name = "New Group", color = "#6366f1") => {
+    const group = { id: makeId("grp"), name, color, nodeIds: [...nodeIds] };
+    set((state) => withWorkflowHistory(state, {
+        ...state.workflow,
+        groups: [...(state.workflow.groups || []), group],
+        updatedAt: new Date().toISOString(),
+      }));
+  },
+
+  deleteGroup: (id) =>
+    set((state) => withWorkflowHistory(state, {
+        ...state.workflow,
+        groups: (state.workflow.groups || []).filter((g) => g.id !== id),
+        updatedAt: new Date().toISOString(),
+      })),
+
+  renameGroup: (id, name) =>
+    set((state) => withWorkflowHistory(state, {
+        ...state.workflow,
+        groups: (state.workflow.groups || []).map((g) => g.id === id ? { ...g, name } : g),
+        updatedAt: new Date().toISOString(),
+      })),
+
+  updateGroupColor: (id, color) =>
+    set((state) => withWorkflowHistory(state, {
+        ...state.workflow,
+        groups: (state.workflow.groups || []).map((g) => g.id === id ? { ...g, color } : g),
+        updatedAt: new Date().toISOString(),
+      })),
+
+  ungroupNodes: (id) =>
+    set((state) => withWorkflowHistory(state, {
+        ...state.workflow,
+        groups: (state.workflow.groups || []).filter((g) => g.id !== id),
+        updatedAt: new Date().toISOString(),
+      })),
+
+  // ── Multi-workflow management (Phase A) ───────────────────────────────────
+  addWorkflow: (name) => {
+    const { activeProjectId, projects } = get();
+    const project = projects.find((p) => p.id === activeProjectId);
+    if (!project) return;
+    const workflowName = name || makeUntitledWorkflowName(project.workflows || [], projectStarterWorkflowName(project));
+    const defaults = projectExecutionDefaults(project);
+    const wf = {
+      ...emptyWorkflow(),
+      id: makeId("wf"),
+      name: workflowName,
+      builderTarget: defaults.builderTarget || "langgraph",
+      planConstraints: { ...DEFAULT_PLAN_CONSTRAINTS, ...(defaults.planConstraints || {}) },
+    };
+    const updatedWorkflows = [...(project.workflows || []), wf];
+    const updatedProject = { ...project, workflows: updatedWorkflows, activeWorkflowId: wf.id, updatedAt: new Date().toISOString() };
+    const updatedProjects = projects.map((p) => (p.id === activeProjectId ? updatedProject : p));
+    saveProjectsToStorage(updatedProjects);
+    upsertProject(updatedProject, currentUserKey(get().currentUser)).catch(() => {});
+    set((state) => ({
+      projects: updatedProjects,
+      activeWorkflowId: wf.id,
+      workflow: wf,
+      workflowHistoryPast: [],
+      workflowHistoryFuture: [],
+      selectedNodeId: "",
+      focusNodeId: "",
+      workflowTabOpen: true,
+      activeWorkspaceTab: "workflow",
+      agentTabIds: [],
+      focusVersion: state.focusVersion + 1,
+      statusMessage: `"${wf.name}" created.`,
+    }));
+    return wf.id;
+  },
+
+  removeWorkflow: (workflowId) => {
+    const { activeProjectId, activeWorkflowId, projects } = get();
+    const project = projects.find((p) => p.id === activeProjectId);
+    if (!project || (project.workflows || []).length <= 1) {
+      set({ statusMessage: "Can't delete the last workflow in a project." });
+      return;
+    }
+    const remaining = (project.workflows || []).filter((w) => w.id !== workflowId);
+    const newActiveId = workflowId === activeWorkflowId
+      ? remaining[0]?.id
+      : activeWorkflowId;
+    const newActiveWf = remaining.find((w) => w.id === newActiveId) || remaining[0];
+    const updatedProject = { ...project, workflows: remaining, activeWorkflowId: newActiveId, updatedAt: new Date().toISOString() };
+    const updatedProjects = projects.map((p) => (p.id === activeProjectId ? updatedProject : p));
+    saveProjectsToStorage(updatedProjects);
+    upsertProject(updatedProject, currentUserKey(get().currentUser)).catch(() => {});
+    const switchingActive = workflowId === activeWorkflowId;
+    set((state) => ({
+      projects: updatedProjects,
+      ...(switchingActive ? {
+        activeWorkflowId: newActiveWf?.id || null,
+        workflow: newActiveWf || defaultWorkflow(),
+        selectedNodeId: newActiveWf?.nodes?.[0]?.id || "",
+        focusNodeId: newActiveWf?.nodes?.[0]?.id || "",
+        workflowHistoryPast: [],
+        workflowHistoryFuture: [],
+        agentTabIds: [],
+        focusVersion: state.focusVersion + 1,
+      } : {}),
+      statusMessage: "Workflow deleted.",
+    }));
+  },
+
+  renameWorkflow: (workflowId, name) => {
+    const { activeProjectId, activeWorkflowId, projects } = get();
+    const project = projects.find((p) => p.id === activeProjectId);
+    if (!project) return;
+    const updatedWorkflows = (project.workflows || []).map((w) =>
+      w.id === workflowId ? { ...w, name, updatedAt: new Date().toISOString() } : w
+    );
+    const updatedProject = { ...project, workflows: updatedWorkflows, updatedAt: new Date().toISOString() };
+    const updatedProjects = projects.map((p) => (p.id === activeProjectId ? updatedProject : p));
+    saveProjectsToStorage(updatedProjects);
+    upsertProject(updatedProject, currentUserKey(get().currentUser)).catch(() => {});
+    set((state) => ({
+      projects: updatedProjects,
+      ...(workflowId === activeWorkflowId ? { workflow: { ...state.workflow, name } } : {}),
+    }));
+  },
+
+  duplicateWorkflow: (workflowId) => {
+    const { activeProjectId, projects } = get();
+    const project = projects.find((p) => p.id === activeProjectId);
+    if (!project) return;
+    const source = (project.workflows || []).find((w) => w.id === workflowId);
+    if (!source) return;
+    // Deep clone with new IDs for workflow + all nodes + edges
+    const idMap = {};
+    const newNodes = (source.nodes || []).map((n) => {
+      const nid = makeId("node");
+      idMap[n.id] = nid;
+      return { ...n, id: nid };
+    });
+    const newEdges = (source.edges || []).map((e) => ({
+      ...e,
+      id: makeId("edge"),
+      source: idMap[e.source] || e.source,
+      target: idMap[e.target] || e.target,
+    }));
+    const copy = { ...source, id: makeId("wf"), name: `${source.name} Copy`, nodes: newNodes, edges: newEdges, groups: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const updatedWorkflows = [...(project.workflows || []), copy];
+    const updatedProject = { ...project, workflows: updatedWorkflows, updatedAt: new Date().toISOString() };
+    const updatedProjects = projects.map((p) => (p.id === activeProjectId ? updatedProject : p));
+    saveProjectsToStorage(updatedProjects);
+    upsertProject(updatedProject, currentUserKey(get().currentUser)).catch(() => {});
+    set({ projects: updatedProjects, statusMessage: `"${copy.name}" created.` });
+    return copy.id;
+  },
+
+  setActiveWorkflow: (workflowId) => {
+    const { activeProjectId, projects } = get();
+    const project = projects.find((p) => p.id === activeProjectId);
+    const wf = (project?.workflows || []).find((w) => w.id === workflowId);
+    if (!wf) {
+      // Guard: dangling ID — fall back to first workflow
+      const fallback = project?.workflows?.[0];
+      if (!fallback) return;
+      set((state) => ({
+        activeWorkflowId: fallback.id,
+        workflow: fallback,
+        workflowHistoryPast: [],
+        workflowHistoryFuture: [],
+        selectedNodeId: fallback.nodes?.[0]?.id || "",
+        focusNodeId: fallback.nodes?.[0]?.id || "",
+        workflowTabOpen: true,
+        activeWorkspaceTab: "workflow",
+        agentTabIds: [],
+        focusVersion: state.focusVersion + 1,
+      }));
+      return;
+    }
+    const updatedProject = { ...project, activeWorkflowId: workflowId };
+    const updatedProjects = projects.map((p) => (p.id === activeProjectId ? updatedProject : p));
+    saveProjectsToStorage(updatedProjects);
+    set((state) => ({
+      projects: updatedProjects,
+      activeWorkflowId: workflowId,
+      workflow: wf,
+      workflowHistoryPast: [],
+      workflowHistoryFuture: [],
+      selectedNodeId: wf.nodes?.[0]?.id || "",
+      focusNodeId: wf.nodes?.[0]?.id || "",
+      workflowTabOpen: true,
+      activeWorkspaceTab: "workflow",
+      agentTabIds: [],
+      focusVersion: state.focusVersion + 1,
+      statusMessage: `Switched to "${wf.name}".`,
+    }));
+  },
+
+  // Expose active project's workflows list for UI consumption
+  getWorkflows: () => {
+    const { activeProjectId, projects } = get();
+    const project = projects.find((p) => p.id === activeProjectId);
+    return project?.workflows || [];
+  },
 }));
+
+// ── Auto-persist workflow to localStorage ─────────────────────────────────────
+// T3: Watches state.workflow (the active workflow alias). On change, writes the
+// updated workflow back into the correct slot in projects[activeProjectId].workflows[].
+let _autosaveTimer = null;
+useWorkflowStore.subscribe((state, prev) => {
+  if (state.workflow === prev.workflow) return;
+  if (!state.activeProjectId || !state.projects.length) return;
+  clearTimeout(_autosaveTimer);
+  _autosaveTimer = setTimeout(() => {
+    const { workflow, activeProjectId, activeWorkflowId, projects } = useWorkflowStore.getState();
+    if (!activeProjectId || !workflow) return;
+    const newProjects = projects.map((p) => {
+      if (p.id !== activeProjectId) return p;
+      const updatedWorkflows = (p.workflows || []).map((wf) =>
+        wf.id === (activeWorkflowId || workflow.id) ? { ...workflow, updatedAt: workflow.updatedAt } : wf
+      );
+      return {
+        ...p,
+        workflows: updatedWorkflows,
+        updatedAt: workflow.updatedAt,
+      };
+    });
+    saveProjectsToStorage(newProjects);
+  }, 1000);
+});

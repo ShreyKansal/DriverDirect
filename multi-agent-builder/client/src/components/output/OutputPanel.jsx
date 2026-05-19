@@ -6,7 +6,7 @@ import AgentOutputCard from "./AgentOutputCard.jsx";
 function PanelTab({ active, children, onClick }) {
   return (
     <button
-      className={`relative flex h-9 items-center px-3 text-[12px] transition ${
+      className={`relative flex h-9 items-center px-3 text-[11px] transition ${
         active
           ? "text-[var(--term-active-text)]"
           : "text-[var(--term-muted)] hover:text-[var(--term-text)]"

@@ -1,33 +1,34 @@
-import { eq, desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "../db/index.js";
 import { savedWorkflows } from "../db/schema.js";
+import { decryptJson, encryptJson } from "./cryptoStore.js";
 
 export async function saveWorkflow(workflow) {
   const now = new Date();
   const normalized = {
     ...workflow,
-    id:        workflow.id || `workflow_${nanoid(8)}`,
+    id: workflow.id || `workflow_${nanoid(8)}`,
     createdAt: workflow.createdAt || now.toISOString(),
-    updatedAt: now.toISOString()
+    updatedAt: now.toISOString(),
   };
 
   await db
     .insert(savedWorkflows)
     .values({
-      id:           normalized.id,
-      name:         normalized.name || "",
-      workflowJson: normalized,
-      createdAt:    new Date(normalized.createdAt),
-      updatedAt:    now
+      id: normalized.id,
+      name: normalized.name || "",
+      workflowJson: encryptJson(normalized),
+      createdAt: new Date(normalized.createdAt),
+      updatedAt: now,
     })
     .onConflictDoUpdate({
       target: savedWorkflows.id,
       set: {
-        name:         normalized.name || "",
-        workflowJson: normalized,
-        updatedAt:    now
-      }
+        name: normalized.name || "",
+        workflowJson: encryptJson(normalized),
+        updatedAt: now,
+      },
     });
 
   return normalized;
@@ -39,7 +40,7 @@ export async function getWorkflows() {
     .from(savedWorkflows)
     .orderBy(desc(savedWorkflows.updatedAt));
 
-  return rows.map((r) => r.workflowJson);
+  return rows.map((row) => decryptJson(row.workflowJson));
 }
 
 export async function getWorkflowById(id) {
@@ -48,5 +49,5 @@ export async function getWorkflowById(id) {
     .from(savedWorkflows)
     .where(eq(savedWorkflows.id, id));
 
-  return row?.workflowJson || null;
+  return row ? decryptJson(row.workflowJson) : null;
 }

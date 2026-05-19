@@ -13,10 +13,7 @@ export async function migrate() {
     )
   `);
 
-  // Add password_hash to existing installs
-  await query(`
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT
-  `);
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT`);
 
   await query(`
     CREATE TABLE IF NOT EXISTS projects (
@@ -30,9 +27,7 @@ export async function migrate() {
     )
   `);
 
-  await query(`
-    ALTER TABLE projects ADD COLUMN IF NOT EXISTS user_id TEXT
-  `);
+  await query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS user_id TEXT`);
 
   await query(`
     CREATE TABLE IF NOT EXISTS saved_workflows (

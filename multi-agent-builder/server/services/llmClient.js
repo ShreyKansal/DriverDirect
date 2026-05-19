@@ -18,7 +18,7 @@ export function createChatModel(agentConfig = {}, projectKeys = {}, customProvid
     const apiKey = resolveKey(projectKeys, providerId);
     if (!apiKey) {
       throw new Error(
-        `No API key configured for ${builtIn.name}. Add it in Project Settings → AI Providers.`
+        `No API key configured for ${builtIn.name}. Add it in App Settings → Model Providers.`
       );
     }
     const model       = agentConfig.model       || builtIn.models[0]?.id || "";

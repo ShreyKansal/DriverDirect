@@ -31,6 +31,8 @@ function detectCycle(nodes, edges) {
 export function validateWorkflow(workflow, options = {}) {
   const errors = [];
   const warnings = [];
+  // mode:"subworkflow" relaxes orchestrator/input requirements for WorkflowRef sub-execution
+  const isSubworkflow = options.mode === "subworkflow";
 
   if (!workflow || typeof workflow !== "object") {
     return { valid: false, errors: ["Missing workflow."], warnings };
@@ -45,14 +47,14 @@ export function validateWorkflow(workflow, options = {}) {
   const orchestrators = nodes.filter((node) => node.type === "orchestrator");
   const inputNodes = nodes.filter((node) => node.type === "user_input");
   const normalAgents = nodes.filter((node) => node.type === "agent");
-  if (!orchestrators.length) errors.push("Add exactly one orchestrator.");
+  if (!isSubworkflow && !orchestrators.length) errors.push("Add exactly one orchestrator.");
   if (orchestrators.length > 1) errors.push("Only one orchestrator is allowed.");
-  if (!inputNodes.length) warnings.push("Add a user prompt node so the orchestrator has a visible graph entry point.");
+  if (!isSubworkflow && !inputNodes.length) warnings.push("Add a user prompt node so the orchestrator has a visible graph entry point.");
   if (inputNodes.length > 1) errors.push("Only one user prompt node is allowed.");
   if (!normalAgents.length) errors.push("Add at least one normal agent.");
 
   const nodeIds = new Set(nodes.map((node) => node.id));
-  const allowedTypes = new Set(["user_input", "orchestrator", "agent", "output"]);
+  const allowedTypes = new Set(["user_input", "orchestrator", "agent", "output", "workflow_ref"]);
   edges.forEach((edge) => {
     if (!edge.source || !edge.target) errors.push(`Edge ${edge.id || ""} is missing source or target.`);
     if (edge.source && !nodeIds.has(edge.source)) errors.push(`Edge ${edge.id || ""} points from a missing source node.`);
@@ -60,7 +62,7 @@ export function validateWorkflow(workflow, options = {}) {
   });
 
   nodes.forEach((node) => {
-    if (!allowedTypes.has(node.type)) errors.push(`${node.name || node.id} has an unsupported node type.`);
+    if (!allowedTypes.has(node.type)) errors.push(`${node.name || node.id} has an unsupported node type (${node.type}).`);
     if (!node.name?.trim()) errors.push(`Node ${node.id} is missing a name.`);
     if ((node.type === "agent" || node.type === "orchestrator") && !node.prompt?.trim()) {
       errors.push(`${node.name || node.id} needs a custom system prompt.`);

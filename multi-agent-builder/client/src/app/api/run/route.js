@@ -12,11 +12,20 @@ export async function POST(request) {
   const body = await request.json().catch(() => null);
 
   // Forward to Express with the SSE Accept header so it knows to stream
+  const forwardHeaders = {
+    "Content-Type": "application/json",
+    Accept: "text/event-stream",
+  };
+
+  // Pass the user-id header so the backend can scope the project lookup correctly
+  const userId = request.headers.get("x-user-id");
+  if (userId) forwardHeaders["x-user-id"] = userId;
+
   let upstream;
   try {
     upstream = await fetch(`${BACKEND}/api/run`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      headers: forwardHeaders,
       body: JSON.stringify(body)
     });
   } catch (err) {

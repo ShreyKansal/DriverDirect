@@ -9,6 +9,7 @@ import projectRoutes from "./routes/projectRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import settingsRoutes from "./routes/settingsRoutes.js";
 import customProviderRoutes from "./routes/customProviderRoutes.js";
+import globalKeyRoutes from "./routes/globalKeyRoutes.js";
 import { cleanupOrphans } from "./services/sandboxManager.js";
 import { migrate } from "./db/migrate.js";
 
@@ -29,6 +30,7 @@ app.use("/api/projects", projectRoutes);
 app.use("/api/projects", settingsRoutes);
 app.use("/api/projects", customProviderRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/keys", globalKeyRoutes);
 
 // Kill any sandbox containers left over from a previous crashed session
 cleanupOrphans().catch(() => {});
@@ -42,12 +44,11 @@ app.use((err, _req, res, _next) => {
 });
 
 migrate()
-  .then(() => {
+  .catch((err) => {
+    console.warn(`[DB] PostgreSQL unavailable (${err.message}). Start Postgres to enable API key storage.`);
+  })
+  .finally(() => {
     app.listen(env.port, () => {
       console.log(`Multi-Agent Builder API running on http://localhost:${env.port}`);
     });
-  })
-  .catch((err) => {
-    console.error("DB migration failed:", err.message);
-    process.exit(1);
   });

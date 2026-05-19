@@ -11,6 +11,11 @@ export const pool = new pg.Pool({
   password: env.dbPassword
 });
 
+// Suppress unhandled pool error events so a transient disconnect doesn't crash the process
+pool.on("error", (err) => {
+  console.warn("[DB] Pool error:", err.message);
+});
+
 // Raw query helper — kept for migrate.js which runs plain SQL DDL
 export async function query(text, params) {
   return pool.query(text, params);

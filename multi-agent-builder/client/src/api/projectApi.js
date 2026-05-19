@@ -1,14 +1,11 @@
 import axios from "axios";
+import { userHeaders } from "../utils/authHeaders.js";
 
 const api = axios.create({ baseURL: "/api" });
 
 function message(error) {
   const d = error.response?.data;
   return d?.message || error.message || "Unknown error";
-}
-
-function userHeaders(userId) {
-  return userId ? { "x-user-id": userId } : {};
 }
 
 export async function fetchProjects(userId) {

@@ -1,29 +1,47 @@
 import express from "express";
-import { getProvider }      from "../config/providers.js";
-import { createChatModel }  from "../services/llmClient.js";
+import { getProvider } from "../config/providers.js";
+import { createChatModel } from "../services/llmClient.js";
 import {
-  setProjectKey,
   deleteProjectKey,
-  getProjectKeyStatus
+  getProjectKey,
+  getProjectKeyStatus,
+  setProjectKey,
 } from "../services/keyStore.js";
+import { loadOwnedProject } from "./routeContext.js";
 
 const router = express.Router();
 
-// GET /api/projects/:projectId/keys
-// Returns configured providers for this project (masked key previews, no raw keys)
 router.get("/:projectId/keys", async (req, res) => {
   try {
-    const configured = await getProjectKeyStatus(req.params.projectId);
+    const project = await loadOwnedProject(req, res);
+    if (!project) return;
+
+    const configured = await getProjectKeyStatus(project.id);
     res.json({ configured });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("[keys] DB error:", err.message);
+    res.json({ configured: [], dbError: true });
   }
 });
 
-// PUT /api/projects/:projectId/keys/:providerId
-// Save or update an API key for a provider
+router.get("/:projectId/keys/:providerId", async (req, res) => {
+  try {
+    const project = await loadOwnedProject(req, res);
+    if (!project) return;
+
+    const entry = await getProjectKey(project.id, req.params.providerId);
+    if (!entry) {
+      return res.status(404).json({ error: "Key not found." });
+    }
+    res.json({ apiKey: entry.apiKey, updatedAt: entry.updatedAt });
+  } catch (err) {
+    console.error("[keys] DB error on load:", err.message);
+    res.status(503).json({ error: "Database unavailable." });
+  }
+});
+
 router.put("/:projectId/keys/:providerId", async (req, res) => {
-  const { projectId, providerId } = req.params;
+  const { providerId } = req.params;
   const { apiKey } = req.body;
 
   if (!apiKey || typeof apiKey !== "string" || !apiKey.trim()) {
@@ -34,26 +52,30 @@ router.put("/:projectId/keys/:providerId", async (req, res) => {
   }
 
   try {
-    await setProjectKey(projectId, providerId, apiKey.trim());
+    const project = await loadOwnedProject(req, res);
+    if (!project) return;
+
+    await setProjectKey(project.id, providerId, apiKey.trim());
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("[keys] DB error on save:", err.message);
+    res.status(503).json({ error: "Database unavailable." });
   }
 });
 
-// DELETE /api/projects/:projectId/keys/:providerId
-// Remove a provider's API key from this project
 router.delete("/:projectId/keys/:providerId", async (req, res) => {
   try {
-    await deleteProjectKey(req.params.projectId, req.params.providerId);
+    const project = await loadOwnedProject(req, res);
+    if (!project) return;
+
+    await deleteProjectKey(project.id, req.params.providerId);
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("[keys] DB error on delete:", err.message);
+    res.json({ ok: true });
   }
 });
 
-// POST /api/projects/:projectId/keys/:providerId/test
-// Validate the key by making a minimal API call
 router.post("/:projectId/keys/:providerId/test", async (req, res) => {
   const { providerId } = req.params;
   const { apiKey } = req.body;
@@ -66,19 +88,23 @@ router.post("/:projectId/keys/:providerId/test", async (req, res) => {
   if (!provider) return res.status(400).json({ error: `Unknown provider: ${providerId}` });
 
   try {
+    const project = await loadOwnedProject(req, res);
+    if (!project) return;
+
     const model = createChatModel(
       { provider: providerId, model: provider.models[0]?.id, temperature: 0, maxTokens: 8 },
-      { [providerId]: apiKey.trim() }
+      { [providerId]: apiKey.trim() },
     );
     await model.invoke([{ role: "user", content: "Hi" }]);
     res.json({ ok: true });
   } catch (err) {
     let message = err.message || "Request failed";
-    // Anthropic/OpenAI return structured error messages — extract them
     try {
       const parsed = JSON.parse(message.replace(/^\d+\s+/, ""));
       message = parsed?.error?.message || message;
-    } catch { /* not JSON */ }
+    } catch {
+      // Not JSON.
+    }
     res.status(400).json({ ok: false, error: message });
   }
 });

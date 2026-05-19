@@ -1,6 +1,6 @@
 import { makeId } from "./idUtils.js";
 
-export const NODE_TYPES = ["user_input", "orchestrator", "agent", "output", "tool"];
+export const NODE_TYPES = ["user_input", "orchestrator", "agent", "output", "tool", "workflow_ref"];
 
 export const BUILDER_TARGETS = [
   { id: "langgraph", label: "LangGraph", description: "Stateful graph with conditional edges, cycles, and memory" },
@@ -9,12 +9,24 @@ export const BUILDER_TARGETS = [
 ];
 
 export const NODE_TYPE_LABELS = {
-  user_input:   "User Input",
-  orchestrator: "Orchestrator",
-  agent:        "Agent",
-  output:       "Final Output",
-  tool:         "Tool"
+  user_input:    "User Input",
+  orchestrator:  "Orchestrator",
+  agent:         "Agent",
+  output:        "Final Output",
+  tool:          "Tool",
+  workflow_ref:  "Call Workflow"
 };
+
+// Create a WorkflowRef node pointing to another workflow in the same project
+export function createWorkflowRefNode(targetWorkflowId, targetWorkflowName, position = { x: 300, y: 200 }) {
+  return {
+    id: makeId("wfref"),
+    type: "workflow_ref",
+    name: targetWorkflowName || "Call Workflow",
+    targetWorkflowId,
+    position
+  };
+}
 
 export const BUILTIN_TOOLS = [
   // LangGraph + LangChain compatible
@@ -107,6 +119,24 @@ export function createAgentNode(type = "agent", index = 1, anchorNode = null) {
     customTools: [],
     toolMode: "auto",
     position: anchoredPosition
+  };
+}
+
+export function emptyWorkflow() {
+  const now = new Date().toISOString();
+  return {
+    id: makeId("wf"),
+    name: "Untitled Workflow",
+    description: "",
+    builderTarget: "langgraph",
+    planConstraints: { ...DEFAULT_PLAN_CONSTRAINTS, maxAgentSteps: 8 },
+    nodes: [],
+    edges: [],
+    mermaid: "",
+    groups: [],
+    importedWorkspaces: [],
+    createdAt: now,
+    updatedAt: now
   };
 }
 
@@ -215,6 +245,8 @@ export function defaultWorkflow() {
       { id: "e_orch_out",      source: "orchestrator",    target: "final_output" }
     ],
     mermaid: "",
+    groups: [],
+    importedWorkspaces: [],
     createdAt: now,
     updatedAt: now
   };
@@ -332,6 +364,187 @@ export function personResearchWorkflow() {
       { id: "e_pr_orch_out",    source: "pr_orchestrator", target: "pr_output" }
     ],
     mermaid: "",
+    groups: [],
+    importedWorkspaces: [],
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+export function startupPitchWorkflow() {
+  const now   = new Date().toISOString();
+  const MODEL = "llama-3.1-8b-instant";
+
+  const nodes = [
+    {
+      id: "sp_input",
+      name: "Startup Idea",
+      type: "user_input",
+      role: "Describe the startup idea to be evaluated.",
+      prompt: "A B2B SaaS platform that uses AI to automatically generate personalised outbound sales emails by analysing a prospect's LinkedIn profile, recent company news, and job postings. Pricing: $99/seat/month. Target: SDRs at Series A–C startups.",
+      model: "",
+      provider: "groq",
+      temperature: 0.3,
+      maxTokens: 512,
+      inputMode: "user_input",
+      outputFormat: "plain_text",
+      builtinTools: [],
+      customTools: [],
+      toolMode: "auto",
+      position: { x: 60, y: 240 }
+    },
+    {
+      id: "sp_orchestrator",
+      name: "Pitch Coordinator",
+      type: "orchestrator",
+      role: "Dispatches the idea to three specialist analysts, then synthesises a final investor-grade verdict.",
+      prompt: `You are a senior venture analyst coordinating a startup pitch review. You receive a startup idea from the user and orchestrate three specialist agents — Market Analyst, Tech Evaluator, and Business Model Analyst — to produce independent assessments.
+
+Once all three agents respond, synthesise their findings into a concise but comprehensive investor-grade report using this structure:
+
+## Executive Summary
+2–3 sentences capturing the opportunity and biggest risk.
+
+## Market Analysis
+Key findings from the Market Analyst.
+
+## Technical Assessment
+Key findings from the Tech Evaluator.
+
+## Business Model Review
+Key findings from the Business Model Analyst.
+
+## Overall Verdict
+Score each dimension 1–10. Give a final recommendation: PASS, WATCH, or PASS WITH CONDITIONS.
+
+Be direct, rigorous, and actionable. Avoid filler.`,
+      model: MODEL,
+      provider: "groq",
+      temperature: 0.2,
+      maxTokens: 1500,
+      inputMode: "combined_context",
+      outputFormat: "markdown",
+      builtinTools: [],
+      customTools: [],
+      toolMode: "auto",
+      position: { x: 360, y: 240 }
+    },
+    {
+      id: "sp_market",
+      name: "Market Analyst",
+      type: "agent",
+      role: "Evaluates market size, competitive landscape, and timing.",
+      prompt: `You are a specialist market analyst. Analyse the startup idea provided and produce a structured market assessment covering:
+
+1. **TAM / SAM / SOM** — Estimate the total addressable market and realistic serviceable market in dollars. Be specific, not vague.
+2. **Competitive Landscape** — Name 3–5 direct competitors and explain how this startup differentiates. Is the differentiation durable?
+3. **Market Timing** — Is the market ready now? What macro or technology trends support (or undermine) the timing?
+4. **Customer Pain** — How acute is the problem? Is there evidence of desperate customers paying for inferior solutions today?
+5. **Red Flags** — Identify the 2 biggest market-level risks.
+
+Be analytical and precise. Do not pad the response.`,
+      model: MODEL,
+      provider: "groq",
+      temperature: 0.3,
+      maxTokens: 700,
+      inputMode: "user_input",
+      outputFormat: "markdown",
+      builtinTools: [],
+      customTools: [],
+      toolMode: "auto",
+      position: { x: 680, y: 60 }
+    },
+    {
+      id: "sp_tech",
+      name: "Tech Evaluator",
+      type: "agent",
+      role: "Assesses technical feasibility, moat, and execution risk.",
+      prompt: `You are a specialist technical evaluator with deep experience in AI/ML systems and SaaS infrastructure. Analyse the startup idea and produce a focused technical assessment covering:
+
+1. **Feasibility** — Can this be built with today's technology? What are the hardest engineering problems?
+2. **AI/ML Risk** — If AI is core to the product, assess: hallucination risk, latency, fine-tuning needs, model dependency (e.g., reliance on OpenAI).
+3. **Technical Moat** — Does the product build proprietary data or compounding technical advantages over time, or is it easily replicated?
+4. **Build vs Buy** — What must be built from scratch vs. stitched from APIs? Does a heavy API dependency create fragility?
+5. **Scalability** — Any foreseeable bottlenecks at 100x usage?
+6. **Team Requirements** — What senior technical hires are non-negotiable in the first 12 months?
+
+Be specific. Avoid generic statements like "AI is improving rapidly".`,
+      model: MODEL,
+      provider: "groq",
+      temperature: 0.2,
+      maxTokens: 700,
+      inputMode: "user_input",
+      outputFormat: "markdown",
+      builtinTools: [],
+      customTools: [],
+      toolMode: "auto",
+      position: { x: 680, y: 260 }
+    },
+    {
+      id: "sp_biz",
+      name: "Business Model Analyst",
+      type: "agent",
+      role: "Evaluates revenue model, unit economics, and go-to-market strategy.",
+      prompt: `You are a specialist business model analyst. Analyse the startup idea and produce a rigorous assessment covering:
+
+1. **Revenue Model** — Evaluate the pricing strategy. Is $X/seat/month defensible against competitors and alternatives? Is there expansion revenue potential (upsell, usage-based tiers)?
+2. **Unit Economics** — Estimate LTV:CAC ratio qualitatively. What does the sales cycle likely look like? Is this a self-serve or enterprise motion?
+3. **Go-to-Market** — What is the most realistic first-customer acquisition strategy? Is the ICP (ideal customer profile) tightly defined and reachable?
+4. **Payback Period** — Given typical SaaS churn, estimate how many months to recover CAC. Does the business model require significant up-front capital?
+5. **Monetisation Risks** — What could prevent the company from charging what it wants (e.g., commoditisation, procurement friction, free alternatives)?
+6. **Quick Wins** — Name 2 tactical moves the founders could take in the next 90 days to validate the model.
+
+Be quantitative where possible.`,
+      model: MODEL,
+      provider: "groq",
+      temperature: 0.3,
+      maxTokens: 700,
+      inputMode: "user_input",
+      outputFormat: "markdown",
+      builtinTools: [],
+      customTools: [],
+      toolMode: "auto",
+      position: { x: 680, y: 460 }
+    },
+    {
+      id: "sp_output",
+      name: "Pitch Analysis Report",
+      type: "output",
+      role: "Displays the final investor-grade startup analysis.",
+      prompt: "",
+      model: "",
+      provider: "groq",
+      temperature: 0.3,
+      maxTokens: 512,
+      inputMode: "combined_context",
+      outputFormat: "markdown",
+      builtinTools: [],
+      customTools: [],
+      toolMode: "auto",
+      position: { x: 360, y: 460 }
+    }
+  ];
+
+  return {
+    id: "workflow_startup_pitch",
+    name: "Startup Pitch Analyzer",
+    description: "Three specialist agents — market, tech, and business model — independently evaluate a startup idea, then an orchestrator synthesises a final investor-grade verdict.",
+    builderTarget: "langgraph",
+    planConstraints: { ...DEFAULT_PLAN_CONSTRAINTS, maxAgentSteps: 12 },
+    nodes,
+    edges: [
+      { id: "e_sp_in_orch",     source: "sp_input",        target: "sp_orchestrator" },
+      { id: "e_sp_orch_market", source: "sp_orchestrator", target: "sp_market" },
+      { id: "e_sp_orch_tech",   source: "sp_orchestrator", target: "sp_tech" },
+      { id: "e_sp_orch_biz",    source: "sp_orchestrator", target: "sp_biz" },
+      { id: "e_sp_market_orch", source: "sp_market",       target: "sp_orchestrator" },
+      { id: "e_sp_tech_orch",   source: "sp_tech",         target: "sp_orchestrator" },
+      { id: "e_sp_biz_orch",    source: "sp_biz",          target: "sp_orchestrator" },
+      { id: "e_sp_orch_out",    source: "sp_orchestrator", target: "sp_output" }
+    ],
+    mermaid: "",
+    groups: [],
+    importedWorkspaces: [],
     createdAt: now,
     updatedAt: now
   };

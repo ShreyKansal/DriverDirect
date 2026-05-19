@@ -5,7 +5,7 @@ import { validateWorkflow } from "./graphValidator.js";
 import { createStep, completeStep, failStep } from "../services/executionLogger.js";
 import { collectDependencies } from "../services/dependencyCollector.js";
 import { startSandbox, bootstrap, stopSandbox } from "../services/sandboxManager.js";
-import { getProjectKeys }     from "../services/keyStore.js";
+import { getGlobalKeys, getProjectKeys } from "../services/keyStore.js";
 import { getCustomProviders } from "../services/customProviderStore.js";
 
 function workflowNeedsDocker(workflow) {
@@ -71,17 +71,44 @@ function inputPreview(userTask, incomingOutputs) {
   return `${userTask}\n\nIncoming context:\n${incomingOutputs.map((item) => `${item.agentName}: ${item.output}`).join("\n\n")}`;
 }
 
-export async function executeWorkflow({ workflow, userTask, onEvent = () => {} }) {
-  const validation = validateWorkflow(workflow, { requireTask: true, userTask });
+const MAX_WORKFLOW_DEPTH = 10;
+
+export async function executeWorkflow({
+  workflow,
+  userTask,
+  projectId = null,
+  userId = null,
+  onEvent = () => {},
+  _visited = null,
+  _depth = 0,
+}) {
+  // T4: Circular WorkflowRef guard — prevents stack overflow from A→B→A chains
+  const visited = _visited || new Set();
+  if (visited.has(workflow.id)) {
+    const err = new Error(`CircularRefError: Workflow "${workflow.name || workflow.id}" is part of a circular reference chain. Execution stopped.`);
+    err.code = "CIRCULAR_REF";
+    throw err;
+  }
+  if (_depth >= MAX_WORKFLOW_DEPTH) {
+    const err = new Error(`MaxDepthError: WorkflowRef chain exceeded maximum depth of ${MAX_WORKFLOW_DEPTH}. Check for deeply nested workflow references.`);
+    err.code = "MAX_DEPTH";
+    throw err;
+  }
+  visited.add(workflow.id);
+
+  const isSubworkflow = _depth > 0;
+  const validation = validateWorkflow(workflow, { requireTask: !isSubworkflow, userTask, mode: isSubworkflow ? "subworkflow" : undefined });
   if (!validation.valid) {
     const error = new Error(validation.errors.join(" "));
     error.validation = validation;
     throw error;
   }
 
-  // Load project-level API keys + custom providers
-  const projectKeys = workflow.id ? await getProjectKeys(workflow.id).catch(() => ({})) : {};
-  const customProvidersArr = workflow.id ? await getCustomProviders(workflow.id).catch(() => []) : [];
+  // Load API keys: global keys + project-specific overrides (project wins on conflict)
+  const globalKeys = await getGlobalKeys(userId).catch(() => ({}));
+  const projectSpecificKeys = projectId ? await getProjectKeys(projectId).catch(() => ({})) : {};
+  const projectKeys = { ...globalKeys, ...projectSpecificKeys };
+  const customProvidersArr = projectId ? await getCustomProviders(projectId).catch(() => []) : [];
   const customProviders = Object.fromEntries(customProvidersArr.map((p) => [p.id, p]));
 
   const runId = `run_${nanoid(8)}`;
@@ -89,7 +116,7 @@ export async function executeWorkflow({ workflow, userTask, onEvent = () => {} }
   let sandboxStarted = false;
 
   const orchestrator = workflow.nodes.find((node) => node.type === "orchestrator");
-  const executionOrder = getExecutionOrder(workflow, orchestrator.id);
+  const executionOrder = getExecutionOrder(workflow, orchestrator?.id);
   const maxAgentSteps = Number(workflow.planConstraints?.maxAgentSteps || executionOrder.length || 1);
   const trace = {
     workflowId: workflow.id || `workflow_${nanoid(8)}`,

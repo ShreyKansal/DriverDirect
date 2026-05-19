@@ -230,7 +230,7 @@ export default function ToolConfigPanel({ tool }) {
                       <button
                         key={bt.id}
                         className={`flex w-full items-center gap-3 rounded-md border px-3 py-2 text-left transition ${
-                          active ? "border-primary/30 bg-primary/5" : "border-hairline bg-panel hover:bg-canvasSoft"
+                          active ? "border-primary/30 bg-primary/5" : "border-hairline bg-canvasSoft hover:bg-panel"
                         }`}
                         onClick={() => update({ builtinId: bt.id, name: bt.name, description: bt.description })}
                       >

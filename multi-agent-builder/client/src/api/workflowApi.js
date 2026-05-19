@@ -1,4 +1,5 @@
 import axios from "axios";
+import { userHeaders } from "../utils/authHeaders.js";
 
 const api = axios.create({ baseURL: "/api" });
 
@@ -47,22 +48,30 @@ export async function parseMermaid(mermaid) {
   }
 }
 
-export async function runWorkflow(workflow, userTask) {
+export async function runWorkflow(workflow, userTask, { projectId, userId } = {}) {
   try {
-    const { data } = await api.post("/run", { workflow, userTask });
+    const { data } = await api.post(
+      "/run",
+      { workflow, userTask, projectId },
+      { headers: userHeaders(userId) }
+    );
     return data;
   } catch (error) {
     throw new Error(message(error));
   }
 }
 
-export async function runWorkflowStreaming(workflow, userTask, { onEvent } = {}) {
+export async function runWorkflowStreaming(workflow, userTask, { onEvent, projectId, userId } = {}) {
   let response;
   try {
     response = await fetch("/api/run", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-      body: JSON.stringify({ workflow, userTask })
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        ...userHeaders(userId),
+      },
+      body: JSON.stringify({ workflow, userTask, projectId })
     });
   } catch (networkErr) {
     // Server unreachable / CORS / etc. — route through onEvent so the log shows it

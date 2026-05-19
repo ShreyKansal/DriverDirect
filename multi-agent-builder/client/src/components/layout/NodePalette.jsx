@@ -1,5 +1,4 @@
-import { LayoutDashboard, MessageSquare, RotateCcw, Settings, Sidebar } from "lucide-react";
-import { useWorkflowStore } from "../../store/workflowStore.js";
+import { MessageSquare, Settings, Sidebar } from "lucide-react";
 
 function ActivityBtn({ onClick, title, children, disabled, active }) {
   return (
@@ -19,15 +18,17 @@ function ActivityBtn({ onClick, title, children, disabled, active }) {
   );
 }
 
-export default function NodePalette({ activePanel, projectSettingsActive, onPanelToggle, onProjectSettings }) {
-  const resetWorkflow      = useWorkflowStore((s) => s.resetWorkflow);
-  const autoLayoutWorkflow = useWorkflowStore((s) => s.autoLayoutWorkflow);
-
+export default function NodePalette({
+  activePanel,
+  settingsActive,
+  onPanelToggle,
+  onSettings,
+}) {
   return (
     <div className="flex w-14 shrink-0 flex-col items-center border-r border-hairline bg-panel py-2">
       <ActivityBtn
         onClick={() => onPanelToggle("explorer")}
-        title="Explorer"
+        title="Explorer (Ctrl+B)"
         active={activePanel === "explorer"}
       >
         <Sidebar size={20} />
@@ -35,25 +36,15 @@ export default function NodePalette({ activePanel, projectSettingsActive, onPane
 
       <ActivityBtn
         onClick={() => onPanelToggle("chat")}
-        title="Chat with workflow"
+        title="Chat with workflow (Ctrl+Shift+K)"
         active={activePanel === "chat"}
       >
         <MessageSquare size={20} />
       </ActivityBtn>
 
-      <div className="my-1 h-px w-6 bg-hairline" />
-
-      <ActivityBtn onClick={autoLayoutWorkflow} title="Auto-layout canvas">
-        <LayoutDashboard size={20} />
-      </ActivityBtn>
-
-      <ActivityBtn onClick={resetWorkflow} title="Reset workflow">
-        <RotateCcw size={20} />
-      </ActivityBtn>
-
       <div className="flex-1" />
 
-      <ActivityBtn onClick={onProjectSettings} title="Project settings" active={projectSettingsActive}>
+      <ActivityBtn onClick={onSettings} title="Settings (Ctrl+,)" active={settingsActive}>
         <Settings size={20} />
       </ActivityBtn>
     </div>

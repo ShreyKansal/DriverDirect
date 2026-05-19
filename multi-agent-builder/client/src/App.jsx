@@ -14,14 +14,21 @@ export default function App() {
   const { data: session, status }  = useSession();
   const router                     = useRouter();
 
+  // Use session?.user?.email (a stable string) as the dependency — NOT session?.user (an object).
+  // next-auth creates a new user object reference on every session refresh (browser tab refocus,
+  // token expiry, etc.), which would re-run this effect and call hydrateFromStorage, resetting
+  // the active workspace tab to "workflow" even when the user has settings open.
+  const userEmail = session?.user?.email;
+  const userId    = session?.user?.id;
   useEffect(() => {
-    if (status !== "authenticated" || !session?.user) return;
+    if (status !== "authenticated" || !userEmail) return;
     const user = session.user;
     setCurrentUser(user);
-    syncUser({ id: user.id, email: user.email, name: user.name, picture: user.image })
+    syncUser({ id: userId, email: userEmail, name: user.name, picture: user.image })
       .catch(() => {})
-      .finally(() => hydrateFromStorage(user.email));
-  }, [status]);
+      .finally(() => hydrateFromStorage(userEmail || userId));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, userEmail, userId]);
 
   if (status === "loading") {
     return (

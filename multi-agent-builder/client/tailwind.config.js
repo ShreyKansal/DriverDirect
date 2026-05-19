@@ -36,7 +36,7 @@ export default {
         mono: ["'Cascadia Code'", "Consolas", "'Courier New'", "monospace"],
       },
       boxShadow: {
-        soft: "none",
+        soft: "0 4px 16px 0 rgba(0, 0, 0, 0.35), 0 1px 3px 0 rgba(0, 0, 0, 0.2)",
         modal: "none"
       }
     }

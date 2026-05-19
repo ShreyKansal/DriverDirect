@@ -9,7 +9,7 @@ export function AnimatedThemeToggler({ className = "" }) {
   return (
     <button
       onClick={toggleTheme}
-      className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border border-hairlineStrong bg-panel text-body transition hover:bg-canvasSoft hover:text-ink ${className}`}
+      className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border border-hairlineStrong bg-canvasSoft text-body transition hover:bg-panel hover:text-ink ${className}`}
       title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
       aria-label="Toggle theme"
     >
