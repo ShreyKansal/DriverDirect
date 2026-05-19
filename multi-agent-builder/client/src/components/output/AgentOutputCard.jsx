@@ -106,12 +106,22 @@ export default function AgentOutputCard({ step, index }) {
 
       {open && (
         <div className="ml-4 mt-0.5 space-y-1 border-l border-[var(--term-border-sub)] pl-3">
-          <div>
-            <p className="text-[var(--term-muted)]">input</p>
-            <pre className="mt-0.5 max-h-28 overflow-auto whitespace-pre-wrap text-[var(--term-text)]">
-              {step.input || "(none)"}
-            </pre>
-          </div>
+          {step.systemPrompt && (
+            <div>
+              <p className="text-[var(--term-muted)]">system prompt</p>
+              <pre className="mt-0.5 max-h-40 overflow-auto whitespace-pre-wrap text-[var(--term-text)]">
+                {step.systemPrompt}
+              </pre>
+            </div>
+          )}
+          {step.userMessage && (
+            <div>
+              <p className="text-[var(--term-muted)]">input</p>
+              <pre className="mt-0.5 max-h-40 overflow-auto whitespace-pre-wrap text-[var(--term-text)]">
+                {step.userMessage}
+              </pre>
+            </div>
+          )}
           {(step.output || step.error) && (
             <div>
               <p className={step.status === "failed" ? "text-[var(--term-red)]" : "text-[var(--term-muted)]"}>

@@ -300,6 +300,18 @@ export const useWorkflowStore = create((set, get) => ({
               executionState: { ...r.executionState, [event.agentId]: "running" },
               trace: { ...r.trace, steps: [...r.trace.steps, { agentId: event.agentId, agentName: event.agentName, input: event.input || "", output: "", toolCalls: [], startedAt: new Date().toISOString(), completedAt: "", status: "running" }] }
             }));
+          } else if (event.type === "agent_llm_input") {
+            patchRun((r) => ({
+              ...r,
+              trace: {
+                ...r.trace,
+                steps: r.trace.steps.map((step) =>
+                  step.agentId === event.agentId && step.status === "running"
+                    ? { ...step, systemPrompt: event.systemPrompt, userMessage: event.userMessage, model: event.model, agentPrompt: event.agentPrompt }
+                    : step
+                )
+              }
+            }));
           } else if (event.type === "step_complete") {
             patchRun((r) => ({
               ...r,

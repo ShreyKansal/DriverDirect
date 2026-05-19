@@ -95,6 +95,8 @@ export class LangChainAgent extends BaseAgent {
       const systemPrompt = buildSystemPrompt(this.config, workflowContext);
       const userMessage  = buildUserMessage({ agentConfig: this.config, userTask, previousOutputs, workflowContext });
 
+      onEvent?.({ type: "agent_llm_input", agentId: this.config.id, agentName: this.config.name, systemPrompt, userMessage, model: this.config.model || "(default)", agentPrompt: this.config.prompt || "" });
+
       if (hasTools(this.config) && runId) {
         const toolSchemas = buildToolSchemas(this.config);
 

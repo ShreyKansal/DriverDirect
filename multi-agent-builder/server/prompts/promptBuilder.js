@@ -1,4 +1,3 @@
-import { defaultAgentPrompt } from "./defaultAgentPrompt.js";
 import { orchestratorPrompt } from "./orchestratorPrompt.js";
 
 // Hard cap on any single text chunk sent to the model.
@@ -15,22 +14,9 @@ function trunc(text, max) {
 }
 
 export function buildSystemPrompt(agentConfig, workflowContext = {}) {
-  const basePrompt = agentConfig.type === "orchestrator" ? orchestratorPrompt : defaultAgentPrompt;
+  if (agentConfig.type === "orchestrator") return orchestratorPrompt.trim();
 
-  // Keep agent list short — just names and types, no verbose roles
-  const agentList = (workflowContext.nodes || [])
-    .filter((n) => n.type === "agent" || n.type === "orchestrator")
-    .map((n) => `- ${n.name} (${n.type})`)
-    .join("\n");
-
-  return [
-    basePrompt.trim(),
-    `Agent: ${agentConfig.name} | Type: ${agentConfig.type}`,
-    `Role: ${trunc(agentConfig.role || "No role provided", 200)}`,
-    `Output format: ${agentConfig.outputFormat || "plain_text"}`,
-    agentList ? `Agents in workflow:\n${agentList}` : "",
-    agentConfig.prompt ? `Instructions:\n${agentConfig.prompt}` : ""
-  ]
+  return [agentConfig.role, agentConfig.prompt]
     .filter(Boolean)
     .join("\n\n");
 }
