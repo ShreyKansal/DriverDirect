@@ -1,38 +1,31 @@
-﻿<!-- /autoplan restore point: /c/Users/Shrey/.gstack/projects/ShreyKansal-DriverDirect/main-autoplan-restore-20260518-201111.md -->
+<!-- /autoplan restore point: /c/Users/Shrey/.gstack/projects/ShreyKansal-DriverDirect/main-autoplan-restore-20260520-102317.md -->
 
-# DriverDirect: Config Panel UX Redesign
+# DriverDirect: Agent Console Tab — Advanced Full-Page Agent View
 
-**Branch:** main | **Date:** 2026-05-18
+**Branch:** main | **Date:** 2026-05-20
 **Author:** Shrey Kansal
-**Status:** Draft - pending autoplan review
+**Status:** Draft — pending autoplan review
 
 ---
 
 ## Problem Statement
 
-When a user clicks a node on the canvas, the Config Panel opens on the right. This panel is the primary interface for building agents, but it is confusing for non-technical users:
+When a user clicks "Open in new tab" on an agent node, `AgentDetailView` opens a full-page view. Currently this view is a thin wrapper: left sidebar with "Config" and "Connections", the right side just embeds the same `AgentConfigPanel` that appears in the compact right panel.
 
-1. **Two-tab layout hides critical features.** The Settings gear icon is tiny and non-obvious. Connections (how agents link together) and Output configuration are buried inside it -- most users never find them.
+This means the expanded tab gives you no extra space, no extra information, and no extra power over what you already have in the right panel. It's a missed opportunity for a genuinely powerful per-agent workspace.
 
-2. **Tool section is three completely different things crammed together.** Tool Nodes (canvas nodes), Built-in tools (LangGraph/LangChain dropdown search), and Custom inline tools (raw Python code) are all in one section with no explanation of what any of them do or how they differ.
-
-3. **Role/Description is backward priority.** The agent description (its purpose in the workflow) is in the hidden Settings tab. The system prompt (its internal instructions) is on the main tab. These are flipped.
-
-4. **Jargon everywhere.** Input Mode, Tool Mode, MCP, Built-in tool, Custom inline tool, Orchestrator, User Input node -- none mean anything to someone new to multi-agent systems.
-
-5. **Custom tool creation requires Python.** No way for a non-developer to create a tool without writing code.
-
-### User Persona: Primary Target
-
-A product manager, marketer, or operations person who wants to build an AI workflow without writing code. They understand what they want the agent to do but do not know LangGraph, LangChain, or Python.
+The user wants the agent tab to:
+1. **Look like the Settings tab** — two-column layout with a left navigation sidebar (grouped sections, similar to `UnifiedSettingsPanel`) and a wide content area per section
+2. **Be properly segregated** — Identity, Instructions, Model, Tools (further split: Built-in / Custom / Tool Nodes / Tool Behavior), Connections, Output
+3. **Include a Dev Mode** — an advanced console for the agent: raw JSON state, live execution trace, token usage, prompt history, prompt-level debugging, and direct tool call testing
 
 ---
 
 ## Goal
 
-**Anyone can configure an agent in under 2 minutes.** No jargon. No hidden features. Clear mental model.
+**Dev Mode is the headline.** The Agent Console tab opens to Dev Mode by default — inspect state, test tools, run prompts, read traces. This is what "advanced console" means. The Configure sections (Identity, Instructions, Model, Tools, Connections, Output) are organized in a Settings-panel sidebar and fully functional, but they are secondary to execution.
 
-The config panel should feel like setting up a team member, not programming a robot.
+Every field visible in the compact right panel is also here, with more space. But the reason you open this tab is to execute and observe, not to fill in more config fields.
 
 ---
 
@@ -40,136 +33,154 @@ The config panel should feel like setting up a team member, not programming a ro
 
 ### In Scope
 
-**1. Redesign AgentConfigPanel.jsx**
-- Replace hidden gear icon + 2-tab pattern with a visible 5-tab strip
-- Tabs (in order): Identity | Instructions | Model | Tools | Connections
-- Each tab uses plain-English labels and helper text
-- Remove current activeTab main/settings split entirely
+**1. Redesign `AgentDetailView.jsx`**  
+Replace the current 2-item sidebar + embedded `AgentConfigPanel` with:
+- Left navigation sidebar matching the Settings panel pattern (grouped sections, active indicator, smooth scroll-to-section or tab switching)
+- Sidebar groups: **Configure** (Identity, Instructions, Model, Tools, Connections, Output), **Developer** (Dev Mode)
+- Wide centered content area (max-width ~860px, same as Settings)
+- Sticky section headers in the content area
 
-**2. New tab: Identity** (was: Role/Description in hidden Settings tab)
-- "Who is this agent?" heading
-- Role description textarea (agent.role) as the PRIMARY and first field
-- Node type selector as friendly labeled pill buttons: Agent / Orchestrator / Input / Output
-- Input Mode as a friendly 3-way selector with plain-English descriptions
+**2. Identity section** (full-page, not cramped)
+- Editable agent name (large, prominent)
+- Role/purpose textarea (tall, with character count)
+- Node type selector: pill buttons for Agent / Orchestrator / Input / Output
+- Input Mode selector with plain-English labels
+- Agent status badge (Active / Inactive — visual only, future hook)
 
-**3. New tab: Instructions** (was: System Prompt in Prompt section)
-- "Write instructions for your agent" heading
-- Big textarea with better placeholder
-- Character count
-- Collapsible tips: "Good instructions tell the agent its role, the format of its output, and how to handle edge cases."
+**3. Instructions section**
+- Full-height system prompt textarea with line numbers or monospace font option
+- Character count + estimated token count
+- Collapsible tips panel
+- "Preview compiled prompt" button — shows the full prompt that will be sent (role + system prompt merged)
 
-**4. Improve tab: Model** (was: Model section)
-- Same provider/model dropdowns
-- Temperature: replace raw number input with a labeled slider (Precise 0.0 to Creative 1.5)
-- Max Tokens: plain-English hint "How many words the agent can write per response"
-- Keep existing API key warning banner
+**4. Model section**
+- Provider / Model selects (same as current)
+- Temperature: labeled slider (Precise 0.0 → Balanced 0.75 → Creative 1.5)
+- Max Tokens with plain-English description
+- API key status indicator (green/red dot)
+- Model capability badges (context window, supports tools, supports vision)
 
-**5. Redesign tab: Tools** (was: Tools section)
-- "What can this agent do?" heading
-- Built-in tools as searchable cards with descriptions, not a bare dropdown
-- Tool Nodes shown with Edit link
-- Custom tools: Simple mode form by default (name, description, trigger), Python hidden behind "Switch to code"
-- Python auto-generated from form fields (collapsible preview)
-- Tool Mode renamed to plain English
+**5. Tools section** — split into 4 sub-sections with their own sidebar nav items or in-page headers
 
-**6. New tab: Connections** (was: Connections in hidden Settings tab)
-- "How does this agent connect to others?" heading
-- Receives from and Sends to lists
-- Add connection with a select + button
-- Edge count badge on tab
-- Output format and schema config moved here
+- **Tool Nodes** — canvas nodes connected to this agent. Show name, type icon, description. Edit link opens ToolConfigPanel in-place. Add new Tool Node button.
+- **Built-in Tools** — searchable card grid (name, description, provider badge). Toggle to add/remove. Currently-active tools highlighted.
+- **Custom Tools** — list of inline tools. Create new in Simple mode (name + description + trigger form) or Code mode (Python editor). Edit/delete per tool.
+- **Tool Behavior** — Tool Mode selector (sequential / parallel / router), max tool calls setting, tool timeout setting
 
-**7. Update ToolConfigPanel.jsx** (Tool Node panel)
-- Replace type dropdown with visual type selector cards:
-  - Web API: "Call any website or service"
-  - Built-in: "Use a pre-built tool like web search"
-  - MCP Server: "Connect to a running tool server"
-  - Python: "Write custom logic in Python"
-- Reorganize: Type -> Name -> Description -> Type-specific config -> Test
-- JSON Schemas in Advanced accordion (collapsed by default)
-- Contextual guidance text per type
+**6. Connections section**
+- Receives From list with edge labels
+- Sends To list with edge labels
+- Add connection: dropdown + button
+- Edge count summary badge
+- Visual mini-graph preview (optional: simple ASCII-style or SVG showing this node's neighbors — can be a Phase 2 item, defer if complex)
 
-**8. Update CustomToolEditor.jsx**
-- Simple mode default: name + description + trigger form, Python hidden
-- "Switch to code" button opens existing raw editor
-- Better code templates with inline comments
+**7. Output section**
+- Output format selector (Markdown / JSON / Plain Text)
+- Schema config button (opens `OutputConfigModal`)
+- Output naming prefix field
+- Intermediate output visibility toggle
+
+**8. Dev Mode section** — the centerpiece, opens by default
+
+Two-panel layout. Left = inspector. Right = actions. Both are real and functional on ship.
+
+Left sub-panel (Inspector tabs):
+- **State** — raw JSON of the agent's node data from the store (live, copy button). Updates reactively as user edits config.
+- **Trace** — this agent's execution trace from last run: input received, each tool call (name, args, result), final output. Pulls from `runs[projectId]` store state. Shows "No run yet" empty state with a Run button.
+- **Tokens** — prompt tokens, completion tokens, total. Estimate cost based on known model pricing. Show per-run history (last 5 runs).
+- **Prompt Preview** — the full compiled prompt as it will be sent: role prepended + system prompt. Syntax-highlighted. Copy button. Character and token count.
+
+Right sub-panel (Actions — all real, no "Coming Soon"):
+- **Quick Run** — text input + Run button. Sends the user message to this agent's model call directly by constructing a minimal synthetic workflow (`{ nodes: [userInputNode, thisAgentNode], edges: [inputToAgent] }`) and POSTing to the existing `/api/run` endpoint. No new backend route needed. Response shown synchronously in the output area. This is the primary action — it's the first thing visible.
+- **Test Tool Call** — select from tools attached to this agent. JSON args textarea. Click "Run Tool". **UI shows disabled state** if no tools are attached ("No tools attached to this agent"). Tool test endpoint (`/api/tools/test`) only supports Python custom tools today — for other tool types, show "Testing not available for this tool type" inline message. No endpoint changes needed.
+- **Override Prompt** — textarea. "Active for next run only" checkbox. Injects additional instructions prepended to the system prompt for the next Quick Run only. Stored in component state, not persisted. Visible warning label: "Resets when this tab closes."
+
+Dev Mode is the **default section** when the tab opens. The header also has a "Dev Mode" button (terminal icon) that jumps back to Dev Mode from any other section.
+
+**9. Header update**
+- Keep agent name + type badge + model badge + close button
+- Add a "Dev Mode" toggle button in the header (terminal icon, toggles to Dev Mode section)
+- Add a breadcrumb: "Workflow / {agent name}" in small text below the name
 
 ### Out of Scope
 
-- New agent types or workflow features
-- Backend API or tool execution changes
-- Settings panel (already redesigned in previous plan)
-- Canvas or FlowCanvas changes
-- OutputConfigModal internal changes
-- Store data model changes (agent.role, agent.prompt etc. unchanged)
+- Backend changes for Tool Call testing (that endpoint is deferred — UI scaffolding can exist with a "coming soon" state)
+- Visual mini-graph preview in Connections (defer to Phase 2)
+- Full streaming for Quick Run (backend streaming infrastructure needed — Quick Run ships with synchronous response initially)
+- Changes to `AgentConfigPanel.jsx`, `ToolConfigPanel.jsx`, `CustomToolEditor.jsx` — those are owned by the separate Config Panel redesign plan. This plan only touches `AgentDetailView.jsx` and creates any new sub-components it needs.
+- Store data model changes — read/write same fields as today
 
 ---
 
-## Information Architecture Change
+## Information Architecture
 
-### Current (confusing)
-
-```
-Header: [icon] [name] [type badge] [gear icon - hidden]
-
-Main Tab:
-  PROMPT section
-    system prompt textarea
-    input mode select (jargon)
-  MODEL section
-    provider / model / temp / tokens
-  TOOLS section
-    Tool Nodes + add button
-    Built-in tools (bare dropdown search)
-    Custom inline tools (Python editor)
-    Tool Mode select (jargon)
-
-Settings Tab (gear - hidden):
-  ROLE / DESCRIPTION section
-    role textarea (buried!)
-  CONNECTIONS section
-    link select + add
-    outgoing/incoming edge lists
-  OUTPUT section
-    format select
-    schema config button
-```
-
-### New (clear)
+### Current (thin wrapper)
 
 ```
-Header: [icon] [name editable] [type badge]
+Header: [icon] [name] [model badge] [X]
 
-Tab strip (always visible):
-Identity | Instructions | Model | Tools | Connections
+Sidebar (228px):
+  Config      ← active
+  Connections
 
-Identity Tab:
-  Role description (prominent, first)
-  Type pill selector (Agent / Orchestrator / Input / Output)
-  Input source selector (User / Previous / Both)
+Content:
+  <AgentConfigPanel embedded — same as right panel>
+```
 
-Instructions Tab:
-  System prompt textarea (full height)
-  Tips (collapsible)
-  Character count
+### New (Advanced Console)
 
-Model Tab:
-  Provider / Model selects
-  Temperature slider (Precise to Creative)
-  Max tokens with description
-  API key warning
+```
+Header (48px):
+  [icon] [name] [type badge] | [model badge] [Dev Mode button] [X]
+  breadcrumb: Workflow / {name}
 
-Tools Tab:
-  Connected Tool Nodes (with edit links)
-  Built-in tool cards (searchable grid)
-  Custom tools (Simple mode form)
-  Tool behavior (renamed options)
+Sidebar (220px):
+  DEVELOPER             ← group first
+    Dev Mode            ← default active section
+  CONFIGURE
+    Identity
+    Instructions
+    Model
+    Tools
+      ↳ Tool Nodes
+      ↳ Built-in
+      ↳ Custom
+      ↳ Behavior
+    Connections
+    Output
 
-Connections Tab:
-  Receives from list
-  Sends to list
-  Add connection form
-  Output format + schema config
+Content (max-w-[860px], centered):
+  <section content — full-width, well-spaced, Settings panel styling>
+  <Dev Mode opens by default on tab open>
+```
+
+---
+
+## Dev Mode Layout
+
+```
+Dev Mode (content area, max-w-[860px] content column, sidebar excluded):
+┌────────────────────────────────────────────────────────────────────────┐
+│ DEV MODE    [State] [Trace] [Tokens] [Prompt Preview]                  │
+├─────────────────────────────────┬──────────────────────────────────────┤
+│                                 │  ┌─ Quick Run (PRIMARY) ─────────┐  │
+│  <inspector tab content>        │  │  [user message input........]  │  │
+│                                 │  │  [Run ▶]                       │  │
+│  State: raw JSON of agent node  │  │  ┌─ output area ──────────┐   │  │
+│  Trace: tool calls + result     │  │  │ <response or empty>    │   │  │
+│  Tokens: usage + cost estimate  │  │  └───────────────────────┘   │  │
+│  Prompt: compiled role+system   │  └─────────────────────────────┘  │
+│                                 │  ┌─ Test Tool Call ────────────┐  │
+│                                 │  │  Tool: [searchable select]  │  │
+│                                 │  │  Args: [json textarea]      │  │
+│                                 │  │  [Run Tool] → result below  │  │
+│                                 │  └─────────────────────────────┘  │
+│                                 │  ┌─ Override Prompt ───────────┐  │
+│                                 │  │  [textarea]                 │  │
+│                                 │  │  ☐ Active for next run only │  │
+│                                 │  │  ⚠ Resets on tab close      │  │
+│                                 │  └─────────────────────────────┘  │
+└─────────────────────────────────┴──────────────────────────────────────┘
 ```
 
 ---
@@ -178,60 +189,101 @@ Connections Tab:
 
 | File | Change | Risk |
 |------|--------|------|
-| components/config/AgentConfigPanel.jsx | Full rewrite: 5-tab strip replaces 2-tab hidden-gear | Medium |
-| components/config/ToolConfigPanel.jsx | Visual type cards, field reorder, Advanced accordion for schemas | Medium |
-| components/config/CustomToolEditor.jsx | Add Simple mode vs code mode toggle | Low |
-| components/config/ToolPicker.jsx | Render as card grid, not bare dropdown | Low |
-| components/config/ModelSettings.jsx | Replace temperature number input with labeled slider | Low |
+| `components/flow/AgentDetailView.jsx` | Full rewrite: new sidebar groups, section routing, Settings panel layout | Medium |
+| `components/flow/AgentDevMode.jsx` | **New file**: Dev Mode section — State/Trace/Tokens/Prompt inspector + Actions panel | Low |
+| `components/flow/AgentConsoleIdentity.jsx` | **New file**: Identity section (name, role, type, input mode) | Low |
+| `components/flow/AgentConsoleInstructions.jsx` | **New file**: Instructions section (prompt textarea, preview, char/token count) | Low |
+| `components/flow/AgentConsoleModel.jsx` | **New file**: Model section (provider/model/temp/tokens + capability badges) | Low |
+| `components/flow/AgentConsoleTools.jsx` | **New file**: Tools section (4 sub-sections) | Low |
+| `components/flow/AgentConsoleConnections.jsx` | **New file**: Connections section | Low |
+| `components/flow/AgentConsoleOutput.jsx` | **New file**: Output section | Low |
 
-No new files. No store changes. No backend changes.
+No store changes. No backend changes. New files only add UI.
+
+**Implementation notes (from engineering review):**
+- `AgentDevMode.jsx` needs `const activeProjectId = useWorkflowStore(s => s.activeProjectId)` to read `runs[activeProjectId]`
+- Trace data: filter `runs[activeProjectId]?.trace?.steps?.filter(s => s.agentId === agentId)` — per-agent steps already exist in store
+- Token data: sum from `step.llmResponses` on each trace step (not a top-level field)
+- State tab: use `useWorkflowStore(s => s.workflow.nodes.find(n => n.id === agentId))` as a granular selector, wrap content in `useMemo`, only render when tab is active — prevents performance issues during active runs
+- Type-gating: hide or gray-out Model, Instructions, and Tools sections when `node.type === "output"` or `node.type === "user_input"` (these nodes have no model/prompt/tools)
 
 ---
 
-## User Journey Comparison
+## User Journey
 
-### Before: 10+ steps, confusing
+### Before
 
-1. Click node, panel opens on Prompt tab
-2. Write system prompt
-3. Cannot find role description anywhere
-4. Discover tiny gear icon, click it
-5. Find Role/Description, write it
-6. Back to main tab, scroll to Tools
-7. See 3 tool sections with no explanation
-8. Try Built-in tools, see a bare dropdown
-9. Want to connect agents, back to gear tab
-10. Find Connections buried below Role and Output
+1. Right-click node → Open in new tab
+2. See Config / Connections sidebar
+3. Same AgentConfigPanel as the right panel, slightly wider
+4. Connections tab shows the same ConnectionsPanel
 
-### After: 5 steps, linear
+### After
 
-1. Click node, Identity tab opens
-2. Write role description in the first field
-3. Click Instructions tab, write system prompt
-4. Click Tools tab, click a card to add Web Search
-5. Click Connections tab, select next agent, click Connect
+1. Right-click node → Open in new tab → **Dev Mode opens by default**
+2. Quick Run input is the first thing visible (top of right sub-panel) — type a test message, click Run
+3. Execution trace appears in the left Trace tab immediately after run
+4. Click Identity in the sidebar to fill in name and role
+5. Click Tools → one page with 4 collapsible accordion sections
+6. Header has a persistent "Run" button — click from any section to jump back to Dev Mode and Quick Run
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] Tab strip always visible, no gear icon
-- [ ] Tabs: Identity, Instructions, Model, Tools, Connections
-- [ ] Identity tab: role description is first and most prominent
-- [ ] Identity tab: type selector uses pill buttons with helper text per type
-- [ ] Identity tab: input source uses plain-English 3-way selector
-- [ ] Instructions tab: system prompt textarea with collapsible tips and char count
-- [ ] Model tab: temperature is a labeled slider (Precise to Creative)
-- [ ] Model tab: max tokens has plain-English description
-- [ ] Tools tab: built-in tools shown as searchable cards
-- [ ] Tools tab: custom tools show Simple mode form by default (no code visible)
-- [ ] Tools tab: connected Tool Nodes shown with Edit link
-- [ ] Connections tab: Receives from and Sends to lists visible
-- [ ] Connections tab: output format and schema config located here
-- [ ] ToolConfigPanel: type selector is visual cards, not a dropdown
-- [ ] ToolConfigPanel: JSON schemas in Advanced accordion, collapsed by default
-- [ ] No jargon in tab headings or field labels
-- [ ] All helper text passes a non-developer readability test
+### Layout
+- [ ] Left sidebar has DEVELOPER (first) and CONFIGURE groups, matching Settings panel visual style
+- [ ] Content area max-width 860px (content column only, sidebar excluded), centered, with proper spacing
+- [ ] Sidebar uses click-to-section with `activeSection` state (not scroll-spy)
+- [ ] Dev Mode is the default active section on tab open
+- [ ] Header has a persistent Run button (terminal icon) that jumps to Dev Mode + focuses Quick Run input
+- [ ] Tools sidebar item navigates to a single Tools page with 4 internal accordion sections (no nested sidebar children)
+
+### Identity
+- [ ] Agent name is large, editable, prominent
+- [ ] Role/purpose textarea is tall (min 4 rows)
+- [ ] Node type selector uses pill buttons
+- [ ] Input Mode selector has plain-English labels
+
+### Instructions
+- [ ] System prompt textarea is full-height, monospace font
+- [ ] Character count visible
+- [ ] Estimated token count visible (chars / 4 approximation)
+- [ ] "Preview compiled prompt" shows merged role + system prompt
+
+### Model
+- [ ] Temperature uses labeled slider
+- [ ] Max Tokens has plain-English hint
+- [ ] Model capability badges shown (context window size)
+
+### Tools
+- [ ] Tool Nodes sub-section lists connected tool nodes with edit links
+- [ ] Built-in tools shown as searchable card grid
+- [ ] Custom tools listed with simple/code mode toggle
+- [ ] Tool Behavior sub-section has Tool Mode, max calls, timeout
+
+### Connections
+- [ ] Receives From and Sends To lists
+- [ ] Add connection form (dropdown + button)
+
+### Output
+- [ ] Output format selector
+- [ ] Schema config button
+- [ ] Output naming prefix
+
+### Dev Mode
+- [ ] Quick Run is the FIRST visible action in the right sub-panel (top)
+- [ ] Quick Run: text input + Run button + output area; constructs synthetic single-node workflow + POSTs to `/api/run`; response shown synchronously
+- [ ] Quick Run: loading spinner during request, error state on POST failure ("Run failed: {error}"), empty output area before first run
+- [ ] State tab: `JSON.stringify(node, null, 2)` with granular selector (only re-renders on node change, not all store changes), copy button
+- [ ] Trace tab: filters `runs[activeProjectId]?.trace?.steps` by `agentId`; shows input → tool calls → output per step; "No run yet" empty state with Run button; live update during active run
+- [ ] Tokens tab: sums `step.llmResponses` prompt/completion tokens across agent's trace steps; shows cost estimate; "No run yet" empty state
+- [ ] Prompt Preview tab: compiled prompt (role prepended + system prompt), syntax-highlighted, copy button, char + token count
+- [ ] Test Tool Call: searchable tool selector, JSON textarea for args; disabled with "No tools attached" when agent has no tools; "Testing not available for this tool type" for non-Python tools
+- [ ] Override Prompt: textarea, "Active for next run only" checkbox, visible warning "Resets when this tab closes"
+- [ ] Inspector tabs have `role="tablist"` / `role="tab"` / `role="tabpanel"` / `aria-selected`
+- [ ] Sidebar active item has `aria-current="page"`
+- [ ] Model, Instructions, and Tools sections hidden/grayed when `node.type === "output"` or `node.type === "user_input"`
 
 ---
 
@@ -239,8 +291,31 @@ No new files. No store changes. No backend changes.
 
 | Risk | Impact | Mitigation |
 |------|--------|-----------|
-| Python auto-generated from simple form is incorrect | Medium | Template-based; show editable preview before saving |
-| Tab strip too wide for narrow right panel | Low | Short labels, horizontal scroll on overflow |
-| AgentConfigPanel prop interface changes | None | showProject and onSettings props unchanged |
-| Built-in tool card grid breaks at small width | Low | Single-column at narrow widths |
-| Temperature slider confuses power users | Low | Tooltip shows exact value, keyboard-editable |
+| Too many new files makes it hard to maintain | Low | Each file is a focused section component, follows existing patterns |
+| Dev Mode "Test Tool Call" backend doesn't exist | Low | UI shows disabled state with "Coming soon" — no blocker |
+| Sidebar navigation conflicts with section scroll | Low | Use click-to-section (activeSection state) not scroll spy — simpler, matches Settings panel |
+| Rewriting AgentDetailView may break existing agent tabs | Low | Same props (agentId, onClose), store reads unchanged |
+| Tools section complexity (4 sub-sections) | Medium | Each sub-section is a collapsible accordion within the Tools section, no separate routes needed |
+
+---
+
+## Decision Audit Trail
+
+<!-- AUTONOMOUS DECISION LOG -->
+
+| # | Phase | Decision | Classification | Principle | Rationale | Rejected |
+|---|-------|----------|----------------|-----------|-----------|----------|
+| 1 | CEO | VS Code Settings sidebar layout: kept for organization | TASTE | P5 (explicit) | User said "like settings tab design wise" — this is the right navigation metaphor for organization | Inline expand (Notion-style peek) — user explicitly wants full tab |
+| 2 | CEO | Inline expand alternative | REJECTED | P6 (bias to action) | User explicitly chose full-page tab; feature already exists | N/A |
+| 3 | CEO | Dev Mode upranked to headline + default section | USER DECISION | D1 | User chose Option A: execution-first, Dev Mode default | Keep plan as-is (Settings-panel-first) |
+| 4 | CEO | Quick Run & Tool Test: real features, not stubs | AUTO (P1) | P1 (completeness) | User asked for "advanced console" — stubs deliver no value on ship | Coming Soon stubs |
+| 5 | Design | Journey step 3 (Identity first) → Dev Mode first | AUTO (P5) | P5 (explicit) | Contradicted the stated default; fixed for consistency | Identity as default |
+| 6 | Design | Dev Mode right panel order: Quick Run first | AUTO (P5) | P5 (explicit) | Text said Quick Run was primary; ASCII diagram had it last — text wins | Keep diagram order |
+| 7 | Design | Tools sidebar: single page + 4 internal accordions | AUTO (P5) | P5 (simpler) | No nested sidebar children; reduces navigation complexity; matches Settings pattern | Nested sidebar sub-items for each tool category |
+| 8 | Design | Persistent Run button in header | AUTO (P1) | P1 (completeness) | Quick Run would be hard to find without it; findability is a critical usability requirement | No header button (rely on sidebar) |
+| 9 | Design | Content area = 860px content column (sidebar excluded) | AUTO (P5) | P5 (explicit) | Resolves implementer ambiguity; sidebar is fixed 220px separately | 860px total including sidebar |
+| 10 | Design | Override Prompt: visible reset warning | AUTO (P1) | P1 (completeness) | Component state that resets on close without warning = user data loss surprise | No warning |
+| 11 | Eng | Quick Run: synthetic workflow to `/api/run` | AUTO (P3/P5) | P3 (pragmatic) | Zero new backend code; reuses existing endpoint; achieves same result as new route | New `/api/run/agent` endpoint (backend change) |
+| 12 | Eng | State tab: granular Zustand selector + useMemo | AUTO (P5) | P5 (explicit) | Prevents performance issues during active runs with high-frequency store updates | Coarse workflow selector |
+| 13 | Eng | Type-gating: hide Model/Instructions/Tools for output/input nodes | AUTO (P1) | P1 (completeness) | Output/user_input nodes have no model/prompt/tools — rendering empty broken forms is incorrect | Always render all sections |
+| 14 | Eng | Tool Test: disabled state for non-Python tools | AUTO (P5) | P5 (explicit) | `/api/tools/test` only supports Python; showing wrong state would mislead users | General tool test endpoint (needs backend work) |
