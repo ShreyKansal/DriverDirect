@@ -24,9 +24,9 @@ export default function AgentConsoleModel({ node, update }) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-[18px] font-semibold text-ink">Model</h2>
-        <p className="mt-0.5 text-[12px] text-muted">Choose which AI model powers this agent.</p>
+      <div className="border-b border-hairline pb-4">
+        <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted/50">Model</p>
+        <p className="mt-1.5 text-[12px] text-muted">Which AI model and parameters power this agent.</p>
       </div>
 
       {/* Provider + Model selects (reuse existing component) */}

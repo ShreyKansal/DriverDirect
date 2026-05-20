@@ -27,9 +27,9 @@ export default function AgentConsoleOutput({ node, update }) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-[18px] font-semibold text-ink">Output</h2>
-        <p className="mt-0.5 text-[12px] text-muted">How should this agent format and label its results?</p>
+      <div className="border-b border-hairline pb-4">
+        <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted/50">Output</p>
+        <p className="mt-1.5 text-[12px] text-muted">Format and labeling for this agent's results.</p>
       </div>
 
       <div>

@@ -28,15 +28,15 @@ export default function AgentConsoleInstructions({ node, update, isInput, isOutp
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-[18px] font-semibold text-ink">Instructions</h2>
-        <p className="mt-0.5 text-[12px] text-muted">Write the system prompt that guides this agent's behavior.</p>
+      <div className="border-b border-hairline pb-4">
+        <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted/50">Instructions</p>
+        <p className="mt-1.5 text-[12px] text-muted">System prompt that guides this agent's reasoning and output.</p>
       </div>
 
       {/* System prompt */}
       <div>
-        <div className="mb-1 flex items-center justify-between">
-          <label className="text-[13px] font-semibold text-ink">System Prompt</label>
+        <div className="mb-1.5 flex items-center justify-between">
+          <label className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted">System Prompt</label>
           <div className="flex items-center gap-3 text-[11px] text-muted">
             <span>{chars.toLocaleString()} chars</span>
             <span>~{tokens.toLocaleString()} tokens</span>

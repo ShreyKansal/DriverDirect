@@ -244,10 +244,10 @@ export default function AgentConsoleTools({ node, update, workflow, agentId }) {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-[18px] font-semibold text-ink">Tools</h2>
-        <p className="mt-0.5 text-[12px] text-muted">
-          What can this agent do? {totalCount > 0 ? `${totalCount} tool${totalCount !== 1 ? "s" : ""} active.` : "No tools configured."}
+      <div className="border-b border-hairline pb-4">
+        <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted/50">Tools</p>
+        <p className="mt-1.5 text-[12px] text-muted">
+          {totalCount > 0 ? `${totalCount} tool${totalCount !== 1 ? "s" : ""} active.` : "No tools configured."} Expand a section to add or configure.
         </p>
       </div>
 
