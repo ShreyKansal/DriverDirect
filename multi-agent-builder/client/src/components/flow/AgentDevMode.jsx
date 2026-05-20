@@ -243,7 +243,7 @@ function Inspector({ activeTab, onTabChange, node, agentId, runs, activeProjectI
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[2px] border border-hairline bg-panel">
       <div
-        className="flex shrink-0 border-b border-hairline"
+        className="flex shrink-0 border-b border-hairline bg-canvasSoft"
         role="tablist"
         aria-label="Dev Mode inspector"
       >
@@ -254,10 +254,10 @@ function Inspector({ activeTab, onTabChange, node, agentId, runs, activeProjectI
             aria-selected={activeTab === tab.id}
             aria-controls={`devmode-panel-${tab.id}`}
             onClick={() => onTabChange(tab.id)}
-            className={`flex-1 px-2 py-2 text-[12px] font-medium transition ${
+            className={`px-3 py-1.5 text-[11px] font-medium transition ${
               activeTab === tab.id
-                ? "border-b-2 border-primary text-ink"
-                : "text-muted hover:text-ink"
+                ? "border-b border-primary bg-panel text-ink"
+                : "text-muted/70 hover:text-muted"
             }`}
           >
             {tab.label}
@@ -323,42 +323,47 @@ function QuickRunPanel({ node, workflow, runInputRef }) {
   }
 
   return (
-    <div className="rounded-[2px] border border-hairline bg-panel p-3">
-      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-primary">
-        Quick Run
-      </p>
-      <div className="flex gap-2">
-        <textarea
-          ref={runInputRef}
-          className="slim-scroll min-h-[48px] flex-1 resize-y rounded-[2px] border border-hairline bg-surfaceStrong px-2.5 py-2 text-[12px] text-ink outline-none placeholder:text-muted transition focus:border-primary"
-          placeholder="Type a test message… (Ctrl+Enter to run)"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={onKeyDown}
-        />
-        <button
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[2px] bg-primary text-white transition hover:bg-primary/90 disabled:opacity-50"
-          onClick={handleRun}
-          disabled={loading || !input.trim()}
-          title="Run (Ctrl+Enter)"
-        >
-          {loading ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-        </button>
+    <div className="overflow-hidden rounded-[3px] border border-hairline bg-panel">
+      <div className="flex items-center justify-between border-b border-hairline bg-canvasSoft px-3 py-1.5">
+        <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-primary/80">
+          Quick Run
+        </p>
+        <span className="text-[10px] text-muted/50">Ctrl+Enter</span>
       </div>
-      {error && (
-        <div className="mt-2 flex items-start gap-1.5 rounded-[2px] border border-red-300 bg-red-50 px-2.5 py-2 text-[11px] text-red-700">
-          <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-          <span>{error}</span>
+      <div className="p-2.5">
+        <div className="flex gap-2">
+          <textarea
+            ref={runInputRef}
+            className="slim-scroll min-h-[44px] flex-1 resize-y rounded-[2px] border border-hairline bg-surfaceStrong px-2.5 py-2 font-mono text-[12px] text-ink outline-none placeholder:text-muted/50 transition focus:border-primary"
+            placeholder="Enter a test message…"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onKeyDown}
+          />
+          <button
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[2px] bg-primary text-white transition hover:brightness-110 disabled:opacity-40"
+            onClick={handleRun}
+            disabled={loading || !input.trim()}
+            title="Run"
+          >
+            {loading ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+          </button>
         </div>
-      )}
-      {output && (
-        <div className="mt-2 rounded-[2px] bg-canvasSoft p-2.5 text-[12px] leading-relaxed text-ink whitespace-pre-wrap">
-          {output}
-        </div>
-      )}
-      {!output && !error && !loading && (
-        <p className="mt-2 text-[11px] text-muted">Output will appear here after run.</p>
-      )}
+        {error && (
+          <div className="mt-2 flex items-start gap-1.5 rounded-[2px] border border-red-400/30 bg-red-400/8 px-2.5 py-2 text-[11px] text-red-400">
+            <AlertTriangle size={11} className="mt-0.5 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+        {output && (
+          <div className="mt-2 rounded-[2px] border border-hairline bg-canvasSoft p-2.5 font-mono text-[11.5px] leading-relaxed text-ink whitespace-pre-wrap">
+            {output}
+          </div>
+        )}
+        {!output && !error && !loading && (
+          <p className="mt-2 text-[10px] text-muted/50">Response appears here.</p>
+        )}
+      </div>
     </div>
   );
 }
