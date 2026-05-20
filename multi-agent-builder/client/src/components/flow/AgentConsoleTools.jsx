@@ -14,25 +14,25 @@ const TOOL_MODES = [
 function AccordionSection({ label, badge, defaultOpen = false, children }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="rounded-[2px] border border-hairline">
+    <div className={`rounded-[3px] border transition-colors ${open ? "border-hairlineStrong" : "border-hairline"}`}>
       <button
-        className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-canvasSoft"
+        className="flex w-full items-center justify-between px-3 py-2.5 text-left transition-colors hover:bg-canvasSoft"
         onClick={() => setOpen((o) => !o)}
       >
         <div className="flex items-center gap-2">
-          <span className="text-[13px] font-semibold text-ink">{label}</span>
-          {badge != null && (
-            <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+          <span className="text-[12px] font-semibold text-ink">{label}</span>
+          {badge != null && badge > 0 && (
+            <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold text-primary">
               {badge}
             </span>
           )}
         </div>
         <ChevronDown
-          size={12}
-          className={`text-muted transition-transform duration-150 ${open ? "" : "-rotate-90"}`}
+          size={11}
+          className={`text-muted/60 transition-transform duration-150 ${open ? "" : "-rotate-90"}`}
         />
       </button>
-      {open && <div className="border-t border-hairline px-4 pb-5 pt-3">{children}</div>}
+      {open && <div className="border-t border-hairline px-3 pb-4 pt-3">{children}</div>}
     </div>
   );
 }
