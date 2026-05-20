@@ -35,10 +35,10 @@ function Sidebar({ active, onSelect }) {
       className="slim-scroll shrink-0 overflow-y-auto border-r border-hairline bg-panel"
       style={{ width: 220 }}
     >
-      <nav className="pb-6 pt-2">
-        {SIDEBAR_GROUPS.map((group) => (
-          <div key={group.label} className="mb-1">
-            <p className="px-4 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-widest text-muted">
+      <nav className="pb-6 pt-3">
+        {SIDEBAR_GROUPS.map((group, gi) => (
+          <div key={group.label} className={gi > 0 ? "mt-4" : ""}>
+            <p className="px-4 pb-0.5 pt-1 text-[9.5px] font-bold uppercase tracking-[0.12em] text-muted/50">
               {group.label}
             </p>
             {group.items.map((item) => {
@@ -49,29 +49,22 @@ function Sidebar({ active, onSelect }) {
                   type="button"
                   aria-current={isActive ? "page" : undefined}
                   onClick={() => onSelect(item.id)}
-                  className={`flex w-full items-center gap-1.5 py-[3px] text-left text-[13px] leading-[22px] select-none outline-none ${
-                    isActive ? "font-semibold text-ink" : "font-normal text-body hover:text-ink"
+                  className={`flex w-full items-center gap-1.5 py-[4px] text-left text-[13px] leading-[20px] select-none outline-none transition-colors ${
+                    isActive ? "font-medium text-ink" : "font-normal text-muted hover:text-body"
                   }`}
                   style={
                     isActive
                       ? {
-                          borderLeft: "3px solid rgb(var(--color-primary))",
-                          paddingLeft: 13,
+                          borderLeft: "2px solid rgb(var(--color-primary))",
+                          paddingLeft: 14,
                           paddingRight: 12,
-                          backgroundColor: "rgb(var(--color-canvas-soft))",
                         }
                       : {
-                          borderLeft: "3px solid transparent",
-                          paddingLeft: 13,
+                          borderLeft: "2px solid transparent",
+                          paddingLeft: 14,
                           paddingRight: 12,
                         }
                   }
-                  onMouseEnter={(e) => {
-                    if (!isActive) e.currentTarget.style.backgroundColor = "rgb(var(--color-canvas-soft))";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isActive) e.currentTarget.style.backgroundColor = "";
-                  }}
                 >
                   <span className="truncate">{item.label}</span>
                 </button>
@@ -172,34 +165,37 @@ export default function AgentDetailView({ agentId, onClose }) {
   return (
     <div className="flex h-full min-w-0 flex-col bg-canvas">
       {/* Header */}
-      <div className="flex h-12 shrink-0 items-center gap-3 border-b border-hairline bg-panel px-4">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center">
-          {nodeIcon(node.type, 18)}
+      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-hairline bg-panel px-3">
+        <div className="flex h-6 w-6 shrink-0 items-center justify-center">
+          {nodeIcon(node.type, 15)}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[14px] font-semibold text-ink">{node.name}</p>
-          <p className="text-[11px] text-muted">Workflow / {node.name}</p>
+          <div className="flex items-center gap-1.5 text-[11px] text-muted">
+            <span className="truncate max-w-[120px]">{node.name}</span>
+          </div>
         </div>
         {node.model && (
-          <span className="shrink-0 rounded-full border border-hairlineStrong bg-canvasSoft px-2.5 py-0.5 text-[11px] font-semibold text-muted">
+          <span className="shrink-0 rounded-full border border-hairline bg-canvasSoft px-2 py-0.5 text-[10px] font-medium text-muted">
             {node.model}
           </span>
         )}
         <button
-          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded transition hover:bg-canvasSoft ${
-            activeSection === "devMode" ? "text-primary" : "text-muted hover:text-ink"
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded transition ${
+            activeSection === "devMode"
+              ? "text-primary"
+              : "text-muted/60 hover:bg-canvasSoft hover:text-muted"
           }`}
           onClick={handleRunButton}
-          title="Dev Mode"
+          title="Dev Mode (terminal)"
         >
-          <Terminal size={15} />
+          <Terminal size={13} />
         </button>
         <button
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted transition hover:bg-canvasSoft hover:text-ink"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted/50 transition hover:bg-canvasSoft hover:text-muted"
           onClick={onClose}
           title="Close tab"
         >
-          <X size={15} />
+          <X size={13} />
         </button>
       </div>
 
@@ -207,7 +203,7 @@ export default function AgentDetailView({ agentId, onClose }) {
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar active={activeSection} onSelect={setActiveSection} />
         <div className="slim-scroll min-w-0 flex-1 overflow-auto">
-          <div className="mx-auto h-full max-w-[860px] min-w-0 px-8 py-6">
+          <div className="mx-auto h-full max-w-[760px] min-w-0 px-10 py-8">
             {renderSection()}
           </div>
         </div>
